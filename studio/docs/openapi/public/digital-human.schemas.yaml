@@ -4,9 +4,7 @@ components:
       summary: 数字员工列表
       type: array
       items:
-        type: object
-        properties:
-          $ref: '#/components/schemas/DigitalHuman'
+        $ref: '#/components/schemas/DigitalHuman'
 
     DigitalHuman:
       summary: 数字员工信息

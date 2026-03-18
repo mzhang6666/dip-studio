@@ -17,7 +17,7 @@ import {
   resolveTimeoutMs
 } from "./config/env";
 import { HttpError } from "./errors/http-error";
-import { errorHandler } from "./middleware/error-handler";
+import { errorHandler, resolveErrorCode } from "./middleware/error-handler";
 import { notFoundHandler } from "./middleware/not-found";
 import { getHealth } from "./routes/health";
 import { getDigitalHumans } from "./routes/openclaw";
@@ -273,9 +273,8 @@ describe("errorHandler", () => {
 
     expect(response.status).toHaveBeenCalledWith(418);
     expect(response.json).toHaveBeenCalledWith({
-      error: {
-        message: "Diagnostic failure"
-      }
+      code: "HTTP_418",
+      description: "Diagnostic failure"
     });
   });
 
@@ -286,10 +285,21 @@ describe("errorHandler", () => {
 
     expect(response.status).toHaveBeenCalledWith(500);
     expect(response.json).toHaveBeenCalledWith({
-      error: {
-        message: "Internal Server Error"
-      }
+      code: "INTERNAL_SERVER_ERROR",
+      description: "Internal Server Error"
     });
+  });
+});
+
+describe("resolveErrorCode", () => {
+  it("maps common public error codes and falls back for unsupported status codes", () => {
+    expect(resolveErrorCode(400)).toBe("INVALID_PARAMETER");
+    expect(resolveErrorCode(401)).toBe("UNAUTHORIZED");
+    expect(resolveErrorCode(403)).toBe("FORBIDDEN");
+    expect(resolveErrorCode(404)).toBe("NOT_FOUND");
+    expect(resolveErrorCode(409)).toBe("CONFLICT");
+    expect(resolveErrorCode(500)).toBe("INTERNAL_SERVER_ERROR");
+    expect(resolveErrorCode(418)).toBe("HTTP_418");
   });
 });
 
