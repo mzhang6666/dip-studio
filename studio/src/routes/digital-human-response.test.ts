@@ -24,10 +24,17 @@ function createResponseDouble(): Response {
     on: vi.fn(),
     flushHeaders: vi.fn(),
     destroyed: false,
+    headersSent: false,
     writableEnded: false
   } as unknown as Response;
 
   vi.mocked(response.status).mockReturnValue(response);
+  vi.mocked(response.flushHeaders).mockImplementation(() => {
+    (response as Response & { headersSent: boolean }).headersSent = true;
+  });
+  vi.mocked(response.end).mockImplementation(() => {
+    (response as Response & { writableEnded: boolean }).writableEnded = true;
+  });
 
   return response;
 }
@@ -276,5 +283,63 @@ describe("createDigitalHumanResponseRouter", () => {
     await handler?.(request, response, next);
 
     expect(next).toHaveBeenCalledWith(upstreamError);
+  });
+
+  it("does not forward errors to middleware after the SSE headers have been sent", async () => {
+    const response = createResponseDouble();
+    const next = vi.fn<NextFunction>();
+    const createResponseStream = vi.fn().mockResolvedValue({
+      status: 200,
+      headers: new Headers({
+        "content-type": "text/event-stream"
+      }),
+      body: {
+        getReader: () => ({
+          read: vi
+            .fn()
+            .mockResolvedValueOnce({
+              done: false,
+              value: new TextEncoder().encode("data: hello\n\n")
+            })
+            .mockRejectedValueOnce(new Error("tool call failed")),
+          releaseLock: vi.fn()
+        })
+      } as unknown as ReadableStream<Uint8Array>
+    });
+    const router = createDigitalHumanResponseRouter({
+      createResponseStream
+    }) as {
+      stack: Array<{
+        route?: {
+          path: string;
+          stack: Array<{
+            handle: (
+              request: Request,
+              response: Response,
+              next: NextFunction
+            ) => Promise<void>;
+          }>;
+        };
+      }>;
+    };
+    const layer = router.stack.find(
+      (entry) => entry.route?.path === "/api/dip-studio/v1/digital-human/:id/chat/responses"
+    );
+    const handler = layer?.route?.stack[0]?.handle;
+    const request = {
+      params: {
+        id: "agent-1"
+      },
+      body: {
+        input: "hello"
+      },
+      on: vi.fn()
+    } as unknown as Request;
+
+    await handler?.(request, response, next);
+
+    expect(response.flushHeaders).toHaveBeenCalledOnce();
+    expect(response.end).toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
   });
 });

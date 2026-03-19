@@ -49,13 +49,12 @@ describe("createOpenClawResponsesRequestBody", () => {
 });
 
 describe("mergeAbortSignals", () => {
-  it("returns a signal that aborts when the caller aborts", () => {
+  it("returns the downstream abort signal unchanged", () => {
     const abortController = new AbortController();
-    const signal = mergeAbortSignals(abortController.signal, 1_000);
+    const signal = mergeAbortSignals(abortController.signal);
 
-    abortController.abort();
-
-    expect(signal.aborted).toBe(true);
+    expect(signal).toBe(abortController.signal);
+    expect(mergeAbortSignals()).toBeUndefined();
   });
 });
 
@@ -110,16 +109,22 @@ describe("DefaultOpenClawResponsesHttpClient", () => {
       },
       fetchImpl
     );
+    const abortController = new AbortController();
 
-    const response = await client.createResponseStream("agent-1", {
-      input: "hello"
-    });
+    const response = await client.createResponseStream(
+      "agent-1",
+      {
+        input: "hello"
+      },
+      abortController.signal
+    );
 
     expect(fetchImpl).toHaveBeenCalledOnce();
     expect(fetchImpl.mock.calls[0]?.[0]).toBe("http://127.0.0.1:19001/v1/responses");
     expect(fetchImpl.mock.calls[0]?.[1]).toMatchObject({
       method: "POST"
     });
+    expect(fetchImpl.mock.calls[0]?.[1]?.signal).toBe(abortController.signal);
     expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body))).toEqual({
       input: "hello",
       model: "agent:agent-1",

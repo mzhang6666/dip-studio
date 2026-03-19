@@ -39,7 +39,7 @@ export interface OpenClawResponsesHttpClientOptions {
   token?: string;
 
   /**
-   * Upstream request timeout in milliseconds.
+   * Reserved for compatibility with shared OpenClaw runtime config.
    */
   timeoutMs: number;
 }
@@ -97,7 +97,6 @@ implements OpenClawResponsesHttpClient {
     requestBody: DigitalHumanResponseRequest,
     signal?: AbortSignal
   ): Promise<OpenClawResponsesHttpResult> {
-    const upstreamSignal = mergeAbortSignals(signal, this.options.timeoutMs);
     const upstreamResponse = await this.fetchImpl(
       buildOpenClawResponsesUrl(this.options.gatewayUrl),
       {
@@ -106,7 +105,7 @@ implements OpenClawResponsesHttpClient {
         body: JSON.stringify(
           createOpenClawResponsesRequestBody(digitalHumanId, requestBody)
         ),
-        signal: upstreamSignal
+        signal: mergeAbortSignals(signal)
       }
     ).catch((error: unknown) => {
       throw normalizeOpenClawResponsesError(error);
@@ -183,19 +182,15 @@ export function createOpenClawResponsesRequestBody(
 }
 
 /**
- * Creates the abort signal shared by the downstream socket and timeout budget.
+ * Returns the downstream abort signal used to cancel the upstream stream.
  *
  * @param signal The abort signal tied to the downstream connection.
- * @param timeoutMs The upstream request timeout in milliseconds.
- * @returns The merged abort signal.
+ * @returns The downstream abort signal, if any.
  */
 export function mergeAbortSignals(
-  signal: AbortSignal | undefined,
-  timeoutMs: number
-): AbortSignal {
-  const timeoutSignal = AbortSignal.timeout(timeoutMs);
-
-  return signal === undefined ? timeoutSignal : AbortSignal.any([signal, timeoutSignal]);
+  signal?: AbortSignal
+): AbortSignal | undefined {
+  return signal;
 }
 
 /**

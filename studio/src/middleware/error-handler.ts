@@ -40,8 +40,13 @@ export function errorHandler(
   error: Error,
   _request: Request,
   response: Response,
-  _next: NextFunction
+  next: NextFunction
 ): void {
+  if (response.headersSent) {
+    next(error);
+    return;
+  }
+
   const statusCode = error instanceof HttpError ? error.statusCode : 500;
   const description =
     error instanceof HttpError ? error.message : "Internal Server Error";

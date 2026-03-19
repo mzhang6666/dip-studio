@@ -225,6 +225,18 @@ describe("errorHandler", () => {
       description: "Internal Server Error"
     });
   });
+
+  it("delegates when headers have already been sent", () => {
+    const response = {
+      headersSent: true
+    } as Response;
+    const next = vi.fn<NextFunction>();
+    const error = new Error("boom");
+
+    errorHandler(error, {} as Request, response, next);
+
+    expect(next).toHaveBeenCalledWith(error);
+  });
 });
 
 describe("resolveErrorCode", () => {

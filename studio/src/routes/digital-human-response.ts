@@ -52,6 +52,11 @@ export function createDigitalHumanResponseRouter(
           return;
         }
 
+        if (response.headersSent) {
+          response.end();
+          return;
+        }
+
         next(
           error instanceof HttpError
             ? error
