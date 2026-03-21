@@ -1,43 +1,37 @@
-import {
-  mkdir,
-  readlink,
-  readdir,
-  rm,
-  symlink,
-  unlink,
-  writeFile
-} from "node:fs/promises";
-import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 import type { OpenClawAgentsAdapter } from "../adapters/openclaw-agents-adapter";
-import { getEnv } from "../config/env";
 import { HttpError } from "../errors/http-error";
+import {
+  linkSkillsToWorkspace,
+  listLinkedSkillNames,
+  syncSkillsToWorkspace
+} from "../infra/skill-linker";
 import type {
+  ChannelConfig,
   CreateDigitalHumanRequest,
   CreateDigitalHumanResult,
-  DigitalHumanList
+  DigitalHumanChannelType,
+  DigitalHumanDetail,
+  DigitalHumanList,
+  DigitalHumanTemplate,
+  UpdateDigitalHumanRequest,
+  UpdateDigitalHumanResult
 } from "../types/digital-human";
-import type { OpenClawAgentsListResult } from "../types/openclaw";
-
-const INTERNAL_SKILL_AGENT_ID = "__internal_skill_agent__";
-
-/**
- * Defines the file system operations needed to synchronize a digital human workspace.
- */
-export interface DigitalHumanWorkspaceStore {
-  /**
-   * Reconciles workspace files and skill links for a digital human.
-   *
-   * @param request The normalized create request.
-   * @param id The resolved digital human identifier.
-   * @returns The relative workspace path exposed to API consumers.
-   */
-  syncWorkspace(
-    request: CreateDigitalHumanRequest,
-    id: string
-  ): Promise<string>;
-}
+import type {
+  OpenClawAgentsListResult
+} from "../types/openclaw";
+import {
+  buildTemplate,
+  mergeFilesToTemplate,
+  mergeTemplatePatch,
+  parseIdentityMarkdown,
+  renderIdentityMarkdown,
+  renderSoulMarkdown
+} from "./digital-human-template";
 
 /**
  * Application logic used to manage digital humans.
@@ -51,75 +45,74 @@ export interface DigitalHumanLogic {
   listDigitalHumans(): Promise<DigitalHumanList>;
 
   /**
-   * Creates a digital human in OpenClaw and synchronizes its workspace.
+   * Retrieves the detail view for a single digital human: fields parsed
+   * from IDENTITY.md and SOUL.md, linked skills, and Feishu channel (when bound).
    *
-   * @param request The normalized create request.
-   * @returns The created digital human payload.
+   * @param id The digital human identifier.
+   * @returns The detail payload (flat fields, no nested template).
    */
-  createDigitalHuman(
-    request: CreateDigitalHumanRequest
-  ): Promise<CreateDigitalHumanResult>;
+  getDigitalHuman(id: string): Promise<DigitalHumanDetail>;
+
+  /**
+   * Creates a new digital human with the full setup flow:
+   * agent creation, template rendering, skill linking, and channel binding.
+   *
+   * @param request The creation request payload.
+   * @returns The created digital human summary including the rendered template.
+   */
+  createDigitalHuman(request: CreateDigitalHumanRequest): Promise<CreateDigitalHumanResult>;
+
+  /**
+   * Deletes an existing digital human.
+   *
+   * @param id The digital human identifier.
+   * @param deleteFiles Whether to remove workspace files. Defaults to `true`.
+   */
+  deleteDigitalHuman(id: string, deleteFiles?: boolean): Promise<void>;
+
+  /**
+   * Partially updates an existing digital human (IDENTITY.md, SOUL.md, skills, channel).
+   *
+   * @param id The digital human identifier.
+   * @param patch Fields to merge; omitted fields are left unchanged.
+   */
+  updateDigitalHuman(
+    id: string,
+    patch: UpdateDigitalHumanRequest
+  ): Promise<UpdateDigitalHumanResult>;
 }
 
 /**
- * Synchronizes digital human workspace files on the local filesystem.
+ * Options required to construct {@link DefaultDigitalHumanLogic}.
  */
-export class FileSystemDigitalHumanWorkspaceStore
-implements DigitalHumanWorkspaceStore {
+export interface DigitalHumanLogicOptions {
   /**
-   * Creates the workspace store.
-   *
-   * @param workspaceRoot Optional explicit workspace root used by tests.
+   * The adapter used to manage OpenClaw agents.
    */
-  public constructor(
-    private readonly workspaceRoot: string = getEnv().openClawWorkspaceDir
-  ) {}
+  openClawAgentsAdapter: OpenClawAgentsAdapter;
 
   /**
-   * Reconciles workspace files and skill links for a digital human.
-   *
-   * @param request The normalized create request.
-   * @param id The resolved digital human identifier.
-   * @returns The relative workspace path exposed to API consumers.
+   * Absolute path to the central skill store directory.
    */
-  public async syncWorkspace(
-    request: CreateDigitalHumanRequest,
-    id: string
-  ): Promise<string> {
-    const workspacePath = join(this.workspaceRoot, id);
-    const skillsDirectoryPath = join(workspacePath, "skills");
-
-    await mkdir(workspacePath, { recursive: true });
-    await mkdir(skillsDirectoryPath, { recursive: true });
-    await syncWorkspaceMarkdown(workspacePath, request);
-    await syncWorkspaceSkills(
-      skillsDirectoryPath,
-      join(
-        this.workspaceRoot,
-        INTERNAL_SKILL_AGENT_ID,
-        "skill-store"
-      ),
-      request.skills ?? []
-    );
-
-    return workspacePath;
-  }
+  skillStorePath: string;
 }
 
 /**
  * Logic implementation that derives digital humans from OpenClaw agents.
  */
 export class DefaultDigitalHumanLogic implements DigitalHumanLogic {
+  private readonly openClawAgentsAdapter: OpenClawAgentsAdapter;
+  private readonly skillStorePath: string;
+
   /**
    * Creates the digital human logic.
    *
-   * @param openClawAgentsAdapter The adapter used to call OpenClaw.
-   * @param workspaceStore The store used to synchronize local workspace files.
+   * @param options Dependencies and configuration.
    */
-  public constructor(
-    private readonly openClawAgentsAdapter: OpenClawAgentsAdapter,
-    private readonly workspaceStore: DigitalHumanWorkspaceStore = new FileSystemDigitalHumanWorkspaceStore()
-  ) {}
+  public constructor(options: DigitalHumanLogicOptions) {
+    this.openClawAgentsAdapter = options.openClawAgentsAdapter;
+    this.skillStorePath = options.skillStorePath;
+  }
 
   /**
    * Fetches the digital human list.
@@ -127,48 +120,313 @@ export class DefaultDigitalHumanLogic implements DigitalHumanLogic {
    * @returns The normalized digital human list.
    */
   public async listDigitalHumans(): Promise<DigitalHumanList> {
-    const agents = await this.openClawAgentsAdapter.listAgents();
+    const { agents } = await this.openClawAgentsAdapter.listAgents();
 
-    return mapAgentsToDigitalHumans(agents);
+    return Promise.all(
+      agents.map(async (agent) => {
+        try {
+          const identityResult = await this.openClawAgentsAdapter.getAgentFile({
+            agentId: agent.id,
+            name: "IDENTITY.md"
+          });
+          const identity = parseIdentityMarkdown(
+            identityResult.file.content ?? ""
+          );
+          return {
+            id: agent.id,
+            name:
+              identity.name ||
+              agent.name ||
+              agent.identity?.name ||
+              agent.id,
+            creature: identity.creature
+          };
+        } catch {
+          return {
+            id: agent.id,
+            name: agent.name ?? agent.identity?.name ?? agent.id,
+            creature: undefined
+          };
+        }
+      })
+    );
   }
 
   /**
-   * Creates a digital human and reconciles its workspace.
+   * Reads IDENTITY.md and SOUL.md for a given agent and maps them to
+   * flat detail fields (name, creature, soul, bkn), plus skills and channel.
    *
-   * @param request The normalized create request.
-   * @returns The created digital human payload.
+   * @param id The digital human identifier.
+   * @returns The detail payload.
+   */
+  public async getDigitalHuman(id: string): Promise<DigitalHumanDetail> {
+    let identityContent: string;
+    let soulContent: string;
+    try {
+      const [identityResult, soulResult] = await Promise.all([
+        this.openClawAgentsAdapter.getAgentFile({
+          agentId: id,
+          name: "IDENTITY.md"
+        }),
+        this.openClawAgentsAdapter.getAgentFile({
+          agentId: id,
+          name: "SOUL.md"
+        })
+      ]);
+      identityContent = identityResult.file.content ?? "";
+      soulContent = soulResult.file.content ?? "";
+    } catch (error: unknown) {
+      throw toNotFoundIfAgentMissing(error, id);
+    }
+
+    const template = mergeFilesToTemplate(identityContent, soulContent);
+    const workspace = resolveDefaultWorkspace(id);
+    let skills: string[] | undefined;
+    try {
+      const linked = await listLinkedSkillNames(workspace);
+      skills = linked.length > 0 ? linked : undefined;
+    } catch {
+      skills = undefined;
+    }
+
+    const channel = await readChannelForAgent(id);
+
+    return {
+      id,
+      name: template.identity.name || id,
+      creature: template.identity.creature,
+      soul: template.soul,
+      bkn: template.bkn,
+      skills,
+      ...(channel !== undefined ? { channel } : {})
+    };
+  }
+
+  /**
+   * Creates a new digital human by orchestrating the full setup flow
+   * as specified in the design document:
+   *
+   * 1. Resolve UUID (use provided id or generate one)
+   * 2. (optional) Bind channel via config.patch
+   * 3. Create the agent in OpenClaw
+   * 4. Write IDENTITY.md and SOUL.md to workspace
+   * 5. Create skill symlinks
+   *
+   * @param request The creation request payload.
+   * @returns The created digital human summary.
    */
   public async createDigitalHuman(
     request: CreateDigitalHumanRequest
   ): Promise<CreateDigitalHumanResult> {
-    const id = request.id ?? randomUUID();
-    const skills = request.skills ?? [];
+    const uuid = request.id ?? randomUUID();
+    const template = buildTemplate(request);
 
-    await this.openClawAgentsAdapter.addAgent({
-      name: request.name,
-      workspace: id
+    const workspace = resolveDefaultWorkspace(uuid);
+
+    await this.openClawAgentsAdapter.createAgent({
+      name: uuid,
+      workspace
     });
 
-    const workspace = await this.workspaceStore.syncWorkspace(
-      {
-        ...request,
-        skills
-      },
-      id
-    );
+    await this.writeTemplateFilesToDisk(workspace, template);
+
+    if (request.skills && request.skills.length > 0) {
+      await linkSkillsToWorkspace(workspace, request.skills, this.skillStorePath);
+    }
+
+    if (request.channel) {
+      try {
+        await this.bindChannel(uuid, request.channel);
+      } catch (err) {
+        console.error("[digital-human] channel binding failed (non-fatal):", err);
+      }
+    }
+
+    return {
+      id: uuid,
+      name: request.name,
+      creature: request.creature,
+      soul: request.soul,
+      skills: request.skills,
+      bkn: request.bkn,
+      channel:
+        request.channel !== undefined
+          ? normalizeChannelForResponse(request.channel)
+          : undefined
+    };
+  }
+
+  /**
+   * Deletes an existing digital human by delegating to the OpenClaw agent adapter.
+   *
+   * @param id The digital human identifier.
+   * @param deleteFiles Whether to remove workspace files. Defaults to `true`.
+   */
+  public async deleteDigitalHuman(
+    id: string,
+    deleteFiles?: boolean
+  ): Promise<void> {
+    await this.openClawAgentsAdapter.deleteAgent({
+      agentId: id,
+      deleteFiles
+    });
+  }
+
+  /**
+   * Applies a partial update: merges patch into current template, writes files,
+   * optionally re-syncs skills and channel binding.
+   *
+   * @param id Agent UUID.
+   * @param patch Partial fields.
+   */
+  public async updateDigitalHuman(
+    id: string,
+    patch: UpdateDigitalHumanRequest
+  ): Promise<UpdateDigitalHumanResult> {
+    let identityContent: string;
+    let soulContent: string;
+    try {
+      const [identityResult, soulResult] = await Promise.all([
+        this.openClawAgentsAdapter.getAgentFile({
+          agentId: id,
+          name: "IDENTITY.md"
+        }),
+        this.openClawAgentsAdapter.getAgentFile({
+          agentId: id,
+          name: "SOUL.md"
+        })
+      ]);
+      identityContent = identityResult.file.content ?? "";
+      soulContent = soulResult.file.content ?? "";
+    } catch (error: unknown) {
+      throw toNotFoundIfAgentMissing(error, id);
+    }
+
+    const current = mergeFilesToTemplate(identityContent, soulContent);
+    const merged = mergeTemplatePatch(current, patch);
+    const workspace = resolveDefaultWorkspace(id);
+
+    await this.writeTemplateFilesToDisk(workspace, merged);
+
+    let skillsOut: string[] | undefined;
+    if (patch.skills !== undefined) {
+      await syncSkillsToWorkspace(workspace, patch.skills, this.skillStorePath);
+      skillsOut = patch.skills.length > 0 ? patch.skills : undefined;
+    } else {
+      const linked = await listLinkedSkillNames(workspace);
+      skillsOut = linked.length > 0 ? linked : undefined;
+    }
+
+    if (patch.channel) {
+      try {
+        await this.bindChannel(id, patch.channel);
+      } catch (err) {
+        console.error("[digital-human] channel binding failed (non-fatal):", err);
+      }
+    }
 
     return {
       id,
-      name: request.name,
-      avatar: request.avatar,
-      skills,
-      workspace
+      name: merged.identity.name,
+      creature: merged.identity.creature,
+      soul: merged.soul,
+      skills: skillsOut,
+      bkn: merged.bkn,
+      channel:
+        patch.channel !== undefined
+          ? normalizeChannelForResponse(patch.channel)
+          : undefined
     };
+  }
+
+  /**
+   * Writes IDENTITY.md and SOUL.md directly to the workspace directory.
+   *
+   * We write to disk rather than using the gateway `agents.files.set` RPC
+   * because the gateway caches the config snapshot in memory. Right after
+   * `agents.create`, the snapshot has not yet been refreshed, so a
+   * subsequent `agents.files.set` call would fail with "unknown agent id".
+   *
+   * @param workspace The absolute path to the agent workspace.
+   * @param template The template to render.
+   */
+  private async writeTemplateFilesToDisk(
+    workspace: string,
+    template: DigitalHumanTemplate
+  ): Promise<void> {
+    const identityMd = renderIdentityMarkdown(template);
+    const soulMd = renderSoulMarkdown(template);
+
+    await mkdir(workspace, { recursive: true });
+    await Promise.all([
+      writeFile(join(workspace, "IDENTITY.md"), identityMd, "utf-8"),
+      writeFile(join(workspace, "SOUL.md"), soulMd, "utf-8")
+    ]);
+  }
+
+  /**
+   * Binds a messaging channel to the agent by directly modifying the
+   * OpenClaw config file on disk.
+   *
+   * We bypass the WS `config.patch` RPC because:
+   * 1. The gateway validates the merged config against installed plugins.
+   *    If the target channel plugin (e.g. feishu / dingtalk) is not installed, the
+   *    patch is rejected with a validation error.
+   * 2. Writing directly is consistent with how we handle IDENTITY.md and
+   *    SOUL.md (to avoid the stale config snapshot issue).
+   *
+   * @param agentId The agent to bind.
+   * @param channel The channel configuration.
+   */
+  private async bindChannel(
+    agentId: string,
+    channel: ChannelConfig
+  ): Promise<void> {
+    const configPath = resolveOpenClawConfigPath();
+    let currentConfig: Record<string, unknown> = {};
+
+    try {
+      const raw = await readFile(configPath, "utf-8");
+      currentConfig = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      // Config file missing or unparseable — start with empty config.
+    }
+
+    const channelKey = resolveOpenClawChannelKey(channel);
+    const binding = { agentId, match: { channel: channelKey } };
+    const existingBindings = Array.isArray(currentConfig.bindings)
+      ? (currentConfig.bindings as unknown[])
+      : [];
+    const filteredBindings = existingBindings.filter((entry) => {
+      if (typeof entry === "object" && entry !== null && "agentId" in entry) {
+        return (entry as { agentId: string }).agentId !== agentId;
+      }
+      return true;
+    });
+
+    const existingChannels =
+      typeof currentConfig.channels === "object" && currentConfig.channels !== null
+        ? (currentConfig.channels as Record<string, unknown>)
+        : {};
+
+    currentConfig.bindings = [...filteredBindings, binding];
+    currentConfig.channels = {
+      ...existingChannels,
+      [channelKey]: {
+        enabled: true,
+        appId: channel.appId,
+        appSecret: channel.appSecret
+      }
+    };
+
+    await writeFile(configPath, JSON.stringify(currentConfig, null, 2) + "\n", "utf-8");
   }
 }
 
 /**
  * Maps the OpenClaw agents payload to the public digital human schema.
+ * Does not load IDENTITY.md; `creature` is always omitted. Prefer
+ * {@link DefaultDigitalHumanLogic.listDigitalHumans} for full list data.
  *
  * @param result The OpenClaw agents list result.
  * @returns The normalized digital human list.
@@ -179,121 +437,131 @@ export function mapAgentsToDigitalHumans(
   return result.agents.map((agent) => ({
     id: agent.id,
     name: agent.name ?? agent.identity?.name ?? agent.id,
-    avatar: agent.identity?.avatarUrl ?? agent.identity?.avatar
+    creature: undefined
   }));
 }
 
 /**
- * Synchronizes `IDENTITY.md` and `SOUL.md` when contents are provided.
+ * Resolves an isolated workspace directory for a given UUID.
  *
- * @param workspacePath The absolute workspace directory.
- * @param request The normalized create request.
- * @returns Nothing once markdown files have been written.
+ * Uses the UUID as the workspace subdirectory name per the design doc.
+ *
+ * @param uuid The digital human UUID.
+ * @returns The absolute path to the agent-specific workspace.
  */
-export async function syncWorkspaceMarkdown(
-  workspacePath: string,
-  request: CreateDigitalHumanRequest
-): Promise<void> {
-  if (request.identity !== undefined) {
-    await writeFile(join(workspacePath, "IDENTITY.md"), request.identity, "utf8");
-  }
-
-  if (request.soul !== undefined) {
-    await writeFile(join(workspacePath, "SOUL.md"), request.soul, "utf8");
-  }
+export function resolveDefaultWorkspace(uuid: string): string {
+  return join(homedir(), ".openclaw", uuid);
 }
 
 /**
- * Reconciles the `skills/` directory so it exactly matches the requested skills.
- *
- * @param skillsDirectoryPath The absolute skills directory path for the workspace.
- * @param skillStorePath The absolute internal skill store path.
- * @param skills The full ordered skill list requested by the caller.
- * @returns Nothing once the skill links match the request.
+ * Maps gateway "agent missing" failures to HTTP 404.
  */
-export async function syncWorkspaceSkills(
-  skillsDirectoryPath: string,
-  skillStorePath: string,
-  skills: string[]
-): Promise<void> {
-  const desiredSkills = new Set(skills);
-  const existingEntries = await readdir(skillsDirectoryPath, {
-    withFileTypes: true
-  });
-
-  await Promise.all(
-    existingEntries
-      .filter((entry) => !desiredSkills.has(entry.name))
-      .map(async (entry) => {
-        const entryPath = join(skillsDirectoryPath, entry.name);
-
-        if (entry.isDirectory()) {
-          await rm(entryPath, { recursive: true, force: true });
-          return;
-        }
-
-        await unlink(entryPath);
-      })
-  );
-
-  for (const skillName of skills) {
-    const targetPath = join(skillStorePath, skillName);
-    const linkPath = join(skillsDirectoryPath, skillName);
-
-    await ensureSkillSourceExists(targetPath, skillName);
-
-    try {
-      const currentTargetPath = await readlink(linkPath);
-
-      if (currentTargetPath === targetPath) {
-        continue;
-      }
-
-      await unlink(linkPath);
-    } catch (error) {
-      if (!isMissingFileError(error)) {
-        throw error;
-      }
-    }
-
-    await symlink(targetPath, linkPath, "dir");
+function toNotFoundIfAgentMissing(error: unknown, id: string): HttpError {
+  const message =
+    error instanceof Error ? error.message : String(error);
+  const lower = message.toLowerCase();
+  if (
+    lower.includes("unknown agent") ||
+    lower.includes("not found") ||
+    lower.includes("no such agent")
+  ) {
+    return new HttpError(404, `Digital human not found: ${id}`);
   }
+  if (error instanceof HttpError) {
+    return error;
+  }
+  throw error instanceof Error ? error : new Error(String(error));
 }
 
 /**
- * Validates that the requested skill exists in the internal skill store.
+ * Resolves the path to the OpenClaw config file.
  *
- * @param targetPath The absolute skill source path.
- * @param skillName The requested skill name.
- * @returns Nothing when the skill source exists.
- * @throws {HttpError} Thrown when the skill cannot be found.
+ * Priority: OPENCLAW_CONFIG_PATH > OPENCLAW_STATE_DIR > ~/.openclaw/openclaw.json.
+ *
+ * @returns The absolute path to the OpenClaw configuration file.
  */
-export async function ensureSkillSourceExists(
-  targetPath: string,
-  skillName: string
-): Promise<void> {
+function resolveOpenClawConfigPath(): string {
+  const explicit = process.env.OPENCLAW_CONFIG_PATH?.trim();
+  if (explicit) {
+    return explicit;
+  }
+  const stateDir = process.env.OPENCLAW_STATE_DIR?.trim();
+  if (stateDir) {
+    return join(stateDir, "openclaw.json");
+  }
+  return join(homedir(), ".openclaw", "openclaw.json");
+}
+
+function resolveOpenClawChannelKey(channel: ChannelConfig): "feishu" | "dingtalk" {
+  const t = channel.type ?? "feishu";
+  return t === "dingtalk" ? "dingtalk" : "feishu";
+}
+
+function normalizeChannelForResponse(channel: ChannelConfig): ChannelConfig {
+  return {
+    type: channel.type ?? "feishu",
+    appId: channel.appId,
+    appSecret: channel.appSecret
+  };
+}
+
+/**
+ * Reads channel credentials from disk when the agent has a matching
+ * `bindings` entry (same shape as channel binding on create/update).
+ */
+async function readChannelForAgent(
+  agentId: string
+): Promise<ChannelConfig | undefined> {
+  const configPath = resolveOpenClawConfigPath();
+  let raw: string;
   try {
-    await readdir(targetPath);
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      throw new HttpError(400, `Unknown skill: ${skillName}`);
-    }
-
-    throw error;
+    raw = await readFile(configPath, "utf-8");
+  } catch {
+    return undefined;
   }
-}
 
-/**
- * Checks whether a file system error indicates a missing path.
- *
- * @param error The thrown file system error.
- * @returns `true` when the path does not exist.
- */
-export function isMissingFileError(error: unknown): error is NodeJS.ErrnoException {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as NodeJS.ErrnoException).code === "ENOENT"
-  );
+  let config: Record<string, unknown>;
+  try {
+    config = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+
+  const bindings = Array.isArray(config.bindings) ? config.bindings : [];
+  const binding = bindings.find((entry) => {
+    if (typeof entry !== "object" || entry === null) {
+      return false;
+    }
+    const e = entry as Record<string, unknown>;
+    return e.agentId === agentId;
+  });
+  if (binding === undefined) {
+    return undefined;
+  }
+  const match = (binding as Record<string, unknown>).match;
+  if (typeof match !== "object" || match === null) {
+    return undefined;
+  }
+  const channelKey = (match as { channel?: string }).channel;
+  if (channelKey !== "feishu" && channelKey !== "dingtalk") {
+    return undefined;
+  }
+
+  const channels = config.channels;
+  if (typeof channels !== "object" || channels === null) {
+    return undefined;
+  }
+  const block = (channels as Record<string, unknown>)[channelKey];
+  if (typeof block !== "object" || block === null) {
+    return undefined;
+  }
+  const f = block as Record<string, unknown>;
+  const appId = typeof f.appId === "string" ? f.appId.trim() : "";
+  const appSecret = typeof f.appSecret === "string" ? f.appSecret.trim() : "";
+  if (appId.length === 0 || appSecret.length === 0) {
+    return undefined;
+  }
+  const type: DigitalHumanChannelType =
+    channelKey === "dingtalk" ? "dingtalk" : "feishu";
+  return { type, appId, appSecret };
 }

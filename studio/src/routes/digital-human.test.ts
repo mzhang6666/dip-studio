@@ -1,4 +1,9 @@
-import type { NextFunction, Request, Response } from "express";
+import type {
+  NextFunction,
+  Request,
+  Response,
+  Router
+} from "express";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 afterEach(() => {
@@ -15,7 +20,8 @@ afterEach(() => {
 function createResponseDouble(): Response {
   const response = {
     status: vi.fn(),
-    json: vi.fn()
+    json: vi.fn(),
+    end: vi.fn()
   } as unknown as Response;
 
   vi.mocked(response.status).mockReturnValue(response);
@@ -24,24 +30,70 @@ function createResponseDouble(): Response {
 }
 
 /**
- * Loads the router module with a mocked digital human logic result.
+ * Locates an Express route handler by path and HTTP method.
  *
- * @param listDigitalHumans Mocked route logic implementation.
+ * @param router The Express router.
+ * @param method HTTP method.
+ * @param path Route path string.
+ * @returns The handler function, if any.
+ */
+function findHandler(
+  router: Router,
+  method: "get" | "post" | "put" | "delete",
+  path: string
+):
+  | ((
+      request: Request,
+      response: Response,
+      next: NextFunction
+    ) => Promise<void>)
+  | undefined {
+  const layer = router.stack.find((l) => {
+    const r = l.route;
+    if (!r || r.path !== path) {
+      return false;
+    }
+    return Boolean((r.methods as Record<string, boolean>)[method]);
+  });
+  return layer?.route?.stack[0]?.handle;
+}
+
+type LogicMocks = Partial<{
+  listDigitalHumans: () => Promise<unknown>;
+  getDigitalHuman: (id: string) => Promise<unknown>;
+  createDigitalHuman: (body: unknown) => Promise<unknown>;
+  updateDigitalHuman: (id: string, patch: unknown) => Promise<unknown>;
+  deleteDigitalHuman: (id: string, deleteFiles?: boolean) => Promise<void>;
+}>;
+
+/**
+ * Loads the router module with a mocked {@link DefaultDigitalHumanLogic}.
+ *
+ * @param logic Mock implementations for logic methods.
  * @returns The imported router factory.
  */
 async function importRouterWithLogicMock(
-  logic: {
-    listDigitalHumans: () => Promise<unknown>;
-    createDigitalHuman: (payload: unknown) => Promise<unknown>;
-  }
+  logic: LogicMocks
 ): Promise<typeof import("./digital-human")> {
   vi.doMock("../logic/digital-human", () => ({
-    FileSystemDigitalHumanWorkspaceStore: vi
-      .fn()
-      .mockImplementation(() => ({})),
     DefaultDigitalHumanLogic: vi.fn().mockImplementation(() => ({
-      listDigitalHumans: logic.listDigitalHumans,
-      createDigitalHuman: logic.createDigitalHuman
+      listDigitalHumans:
+        logic.listDigitalHumans ?? vi.fn().mockResolvedValue([]),
+      getDigitalHuman:
+        logic.getDigitalHuman ??
+        vi.fn().mockResolvedValue({
+          id: "x",
+          name: "x",
+          soul: ""
+        }),
+      createDigitalHuman:
+        logic.createDigitalHuman ??
+        vi.fn().mockResolvedValue({ id: "new", name: "n" }),
+      updateDigitalHuman:
+        logic.updateDigitalHuman ??
+        vi.fn().mockResolvedValue({ id: "x", name: "n", soul: "" }),
+      deleteDigitalHuman:
+        logic.deleteDigitalHuman ?? vi.fn().mockResolvedValue(undefined)
     }))
   }));
 
@@ -49,52 +101,14 @@ async function importRouterWithLogicMock(
 }
 
 describe("createDigitalHumanRouter", () => {
+  const listPath = "/api/dip-studio/v1/digital-human";
+  const detailPath = "/api/dip-studio/v1/digital-human/:id";
+
   it("registers GET /api/dip-studio/v1/digital-human", async () => {
-    const { createDigitalHumanRouter } = await importRouterWithLogicMock({
-      listDigitalHumans: async () => [],
-      createDigitalHuman: async () => ({})
-    });
-    const router = createDigitalHumanRouter() as {
-      stack: Array<{
-        route?: {
-          path: string;
-          stack: Array<{
-            handle: (
-              request: Request,
-              response: Response,
-              next: NextFunction
-            ) => Promise<void>;
-          }>;
-        };
-      }>;
-    };
-    const layer = router.stack.find(
-      (entry) => entry.route?.path === "/api/dip-studio/v1/digital-human"
-    );
+    const { createDigitalHumanRouter } = await importRouterWithLogicMock({});
+    const router = createDigitalHumanRouter() as Router;
 
-    expect(layer).toBeDefined();
-  });
-
-  it("registers POST /api/dip-studio/v1/digital-human", async () => {
-    const { createDigitalHumanRouter } = await importRouterWithLogicMock({
-      listDigitalHumans: async () => [],
-      createDigitalHuman: async () => ({})
-    });
-    const router = createDigitalHumanRouter() as {
-      stack: Array<{
-        route?: {
-          path: string;
-          methods: Record<string, boolean>;
-        };
-      }>;
-    };
-    const layer = router.stack.find(
-      (entry) =>
-        entry.route?.path === "/api/dip-studio/v1/digital-human" &&
-        entry.route.methods.post === true
-    );
-
-    expect(layer).toBeDefined();
+    expect(findHandler(router, "get", listPath)).toBeDefined();
   });
 
   it("returns the digital human list on success", async () => {
@@ -102,30 +116,12 @@ describe("createDigitalHumanRouter", () => {
       listDigitalHumans: async () => [
         {
           id: "main",
-          name: "Main Agent",
-          avatar: "https://example.com/main.png"
+          name: "Main Agent"
         }
-      ],
-      createDigitalHuman: async () => ({})
+      ]
     });
-    const router = createDigitalHumanRouter() as {
-      stack: Array<{
-        route?: {
-          path: string;
-          stack: Array<{
-            handle: (
-              request: Request,
-              response: Response,
-              next: NextFunction
-            ) => Promise<void>;
-          }>;
-        };
-      }>;
-    };
-    const layer = router.stack.find(
-      (entry) => entry.route?.path === "/api/dip-studio/v1/digital-human"
-    );
-    const handler = layer?.route?.stack[0]?.handle;
+    const router = createDigitalHumanRouter() as Router;
+    const handler = findHandler(router, "get", listPath);
     const response = createResponseDouble();
     const next = vi.fn<NextFunction>();
 
@@ -135,73 +131,135 @@ describe("createDigitalHumanRouter", () => {
     expect(response.json).toHaveBeenCalledWith([
       {
         id: "main",
-        name: "Main Agent",
-        avatar: "https://example.com/main.png"
+        name: "Main Agent"
       }
     ]);
     expect(next).not.toHaveBeenCalled();
   });
 
-  it("creates a digital human on POST success", async () => {
-    const createDigitalHuman = vi.fn().mockResolvedValue({
-      id: "main",
-      name: "Main Agent",
-      channel: "telegram",
-      skills: ["planner"],
-      workspace: "workspace/main"
-    });
+  it("GET :id returns detail", async () => {
     const { createDigitalHumanRouter } = await importRouterWithLogicMock({
-      listDigitalHumans: async () => [],
+      getDigitalHuman: async (id) => ({
+        id,
+        name: "N",
+        soul: "s"
+      })
+    });
+    const router = createDigitalHumanRouter() as Router;
+    const handler = findHandler(router, "get", detailPath);
+    const response = createResponseDouble();
+    const next = vi.fn<NextFunction>();
+
+    await handler?.(
+      { params: { id: "a1" } } as unknown as Request,
+      response,
+      next
+    );
+
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(response.json).toHaveBeenCalledWith({
+      id: "a1",
+      name: "N",
+      soul: "s"
+    });
+  });
+
+  it("POST create returns 201", async () => {
+    const createDigitalHuman = vi
+      .fn()
+      .mockResolvedValue({ id: "x", name: "n", soul: "" });
+    const { createDigitalHumanRouter } = await importRouterWithLogicMock({
       createDigitalHuman
     });
-    const router = createDigitalHumanRouter() as {
-      stack: Array<{
-        route?: {
-          path: string;
-          methods: Record<string, boolean>;
-          stack: Array<{
-            handle: (
-              request: Request,
-              response: Response,
-              next: NextFunction
-            ) => Promise<void>;
-          }>;
-        };
-      }>;
-    };
-    const layer = router.stack.find(
-      (entry) =>
-        entry.route?.path === "/api/dip-studio/v1/digital-human" &&
-        entry.route.methods.post === true
-    );
-    const handler = layer?.route?.stack[0]?.handle;
+    const router = createDigitalHumanRouter() as Router;
+    const handler = findHandler(router, "post", listPath);
     const response = createResponseDouble();
     const next = vi.fn<NextFunction>();
 
     await handler?.(
       {
         body: {
-          name: "  Main Agent  ",
-          skills: ["planner"]
+          name: "slug-name",
+          soul: "s"
         }
       } as Request,
       response,
       next
     );
 
-    expect(createDigitalHuman).toHaveBeenCalledWith({
-      id: undefined,
-      name: "Main Agent",
-      avatar: undefined,
-      identity: undefined,
-      soul: undefined,
-      skills: ["planner"]
-    });
     expect(response.status).toHaveBeenCalledWith(201);
-    expect(response.json).toHaveBeenCalledWith({
-      id: "main"
+    expect(response.json).toHaveBeenCalledWith({ id: "x", name: "n", soul: "" });
+  });
+
+  it("PUT :id updates", async () => {
+    const { createDigitalHumanRouter } = await importRouterWithLogicMock({
+      updateDigitalHuman: async () => ({
+        id: "i",
+        name: "n",
+        soul: ""
+      })
     });
-    expect(next).not.toHaveBeenCalled();
+    const router = createDigitalHumanRouter() as Router;
+    const handler = findHandler(router, "put", detailPath);
+    const response = createResponseDouble();
+    const next = vi.fn<NextFunction>();
+
+    await handler?.(
+      {
+        params: { id: "i" },
+        body: { name: "new" }
+      } as unknown as Request,
+      response,
+      next
+    );
+
+    expect(response.status).toHaveBeenCalledWith(200);
+  });
+
+  it("DELETE :id returns 204", async () => {
+    const deleteDigitalHuman = vi.fn().mockResolvedValue(undefined);
+    const { createDigitalHumanRouter } = await importRouterWithLogicMock({
+      deleteDigitalHuman
+    });
+    const router = createDigitalHumanRouter() as Router;
+    const handler = findHandler(router, "delete", detailPath);
+    const response = createResponseDouble();
+    const next = vi.fn<NextFunction>();
+
+    await handler?.(
+      {
+        params: { id: "i" },
+        query: {}
+      } as unknown as Request,
+      response,
+      next
+    );
+
+    expect(deleteDigitalHuman).toHaveBeenCalledWith("i", undefined);
+    expect(response.status).toHaveBeenCalledWith(204);
+    expect(response.end).toHaveBeenCalled();
+  });
+
+  it("DELETE passes deleteFiles=false from query", async () => {
+    const deleteDigitalHuman = vi.fn().mockResolvedValue(undefined);
+    const { createDigitalHumanRouter } = await importRouterWithLogicMock({
+      deleteDigitalHuman
+    });
+    const router = createDigitalHumanRouter() as Router;
+    const handler = findHandler(router, "delete", detailPath);
+    const response = createResponseDouble();
+    const next = vi.fn<NextFunction>();
+
+    await handler?.(
+      {
+        params: { id: "i" },
+        query: { deleteFiles: "false" }
+      } as unknown as Request,
+      response,
+      next
+    );
+
+    expect(deleteDigitalHuman).toHaveBeenCalledWith("i", false);
   });
 
   it("forwards HttpError instances without wrapping them", async () => {
@@ -210,27 +268,10 @@ describe("createDigitalHumanRouter", () => {
     const { createDigitalHumanRouter } = await importRouterWithLogicMock({
       listDigitalHumans: async () => {
         throw error;
-      },
-      createDigitalHuman: async () => ({})
+      }
     });
-    const router = createDigitalHumanRouter() as {
-      stack: Array<{
-        route?: {
-          path: string;
-          stack: Array<{
-            handle: (
-              request: Request,
-              response: Response,
-              next: NextFunction
-            ) => Promise<void>;
-          }>;
-        };
-      }>;
-    };
-    const layer = router.stack.find(
-      (entry) => entry.route?.path === "/api/dip-studio/v1/digital-human"
-    );
-    const handler = layer?.route?.stack[0]?.handle;
+    const router = createDigitalHumanRouter() as Router;
+    const handler = findHandler(router, "get", listPath);
     const response = createResponseDouble();
     const next = vi.fn<NextFunction>();
 
@@ -240,70 +281,14 @@ describe("createDigitalHumanRouter", () => {
     expect(response.status).not.toHaveBeenCalled();
   });
 
-  it("forwards create HttpError instances without wrapping them", async () => {
-    const { HttpError } = await import("../errors/http-error");
-    const error = new HttpError(400, "Invalid request");
-    const { createDigitalHumanRouter } = await importRouterWithLogicMock({
-      listDigitalHumans: async () => [],
-      createDigitalHuman: async () => {
-        throw error;
-      }
-    });
-    const router = createDigitalHumanRouter() as {
-      stack: Array<{
-        route?: {
-          path: string;
-          methods: Record<string, boolean>;
-          stack: Array<{
-            handle: (
-              request: Request,
-              response: Response,
-              next: NextFunction
-            ) => Promise<void>;
-          }>;
-        };
-      }>;
-    };
-    const layer = router.stack.find(
-      (entry) =>
-        entry.route?.path === "/api/dip-studio/v1/digital-human" &&
-        entry.route.methods.post === true
-    );
-    const handler = layer?.route?.stack[0]?.handle;
-    const response = createResponseDouble();
-    const next = vi.fn<NextFunction>();
-
-    await handler?.({ body: { name: "Main Agent" } } as Request, response, next);
-
-    expect(next).toHaveBeenCalledWith(error);
-    expect(response.status).not.toHaveBeenCalled();
-  });
-
   it("wraps unexpected errors with a gateway failure HttpError", async () => {
     const { createDigitalHumanRouter } = await importRouterWithLogicMock({
       listDigitalHumans: async () => {
         throw new Error("boom");
-      },
-      createDigitalHuman: async () => ({})
+      }
     });
-    const router = createDigitalHumanRouter() as {
-      stack: Array<{
-        route?: {
-          path: string;
-          stack: Array<{
-            handle: (
-              request: Request,
-              response: Response,
-              next: NextFunction
-            ) => Promise<void>;
-          }>;
-        };
-      }>;
-    };
-    const layer = router.stack.find(
-      (entry) => entry.route?.path === "/api/dip-studio/v1/digital-human"
-    );
-    const handler = layer?.route?.stack[0]?.handle;
+    const router = createDigitalHumanRouter() as Router;
+    const handler = findHandler(router, "get", listPath);
     const response = createResponseDouble();
     const next = vi.fn<NextFunction>();
 
@@ -317,85 +302,265 @@ describe("createDigitalHumanRouter", () => {
     expect(response.status).not.toHaveBeenCalled();
   });
 
-  it("wraps unexpected create errors with a gateway failure HttpError", async () => {
+  it("POST create forwards HttpError as-is", async () => {
+    const { HttpError } = await import("../errors/http-error");
+    const err = new HttpError(400, "bad");
     const { createDigitalHumanRouter } = await importRouterWithLogicMock({
-      listDigitalHumans: async () => [],
       createDigitalHuman: async () => {
-        throw new Error("boom");
+        throw err;
       }
     });
-    const router = createDigitalHumanRouter() as {
-      stack: Array<{
-        route?: {
-          path: string;
-          methods: Record<string, boolean>;
-          stack: Array<{
-            handle: (
-              request: Request,
-              response: Response,
-              next: NextFunction
-            ) => Promise<void>;
-          }>;
-        };
-      }>;
-    };
-    const layer = router.stack.find(
-      (entry) =>
-        entry.route?.path === "/api/dip-studio/v1/digital-human" &&
-        entry.route.methods.post === true
-    );
-    const handler = layer?.route?.stack[0]?.handle;
+    const router = createDigitalHumanRouter() as Router;
+    const handler = findHandler(router, "post", listPath);
     const response = createResponseDouble();
     const next = vi.fn<NextFunction>();
 
-    await handler?.({ body: { name: "Main Agent" } } as Request, response, next);
+    await handler?.(
+      { body: { name: "x" } } as Request,
+      response,
+      next
+    );
 
-    expect(next).toHaveBeenCalledOnce();
-    expect(vi.mocked(next).mock.calls[0]?.[0]).toMatchObject({
-      statusCode: 502,
-      message: "Failed to create digital human"
-    });
-    expect(response.status).not.toHaveBeenCalled();
-  });
-});
-
-describe("parseCreateDigitalHumanRequest", () => {
-  it("normalizes a valid create request payload", async () => {
-    const { parseCreateDigitalHumanRequest } = await import("./digital-human");
-
-    expect(
-      parseCreateDigitalHumanRequest({
-        id: " main ",
-        name: " Main Agent ",
-        avatar: " https://example.com/main.png ",
-        identity: " # Identity ",
-        soul: " # Soul ",
-        skills: ["planner", "writer"]
-      })
-    ).toEqual({
-      id: "main",
-      name: "Main Agent",
-      avatar: "https://example.com/main.png",
-      identity: "# Identity",
-      soul: "# Soul",
-      skills: ["planner", "writer"]
-    });
+    expect(next).toHaveBeenCalledWith(err);
   });
 
-  it("rejects invalid create request payloads", async () => {
-    const { parseCreateDigitalHumanRequest } = await import("./digital-human");
+  it("POST without name returns 400", async () => {
+    const { createDigitalHumanRouter } = await importRouterWithLogicMock({});
+    const router = createDigitalHumanRouter() as Router;
+    const handler = findHandler(router, "post", listPath);
+    const response = createResponseDouble();
+    const next = vi.fn<NextFunction>();
 
-    expect(() => parseCreateDigitalHumanRequest(null)).toThrow(
-      "Request body must be a JSON object"
+    await handler?.({ body: {} } as Request, response, next);
+
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 400 })
     );
-    expect(() => parseCreateDigitalHumanRequest({})).toThrow(
-      'Field "name" is required'
+  });
+
+  it("PUT with empty patch returns 400", async () => {
+    const { createDigitalHumanRouter } = await importRouterWithLogicMock({});
+    const router = createDigitalHumanRouter() as Router;
+    const handler = findHandler(router, "put", detailPath);
+    const response = createResponseDouble();
+    const next = vi.fn<NextFunction>();
+
+    await handler?.(
+      { params: { id: "x" }, body: {} } as unknown as Request,
+      response,
+      next
     );
-    expect(() =>
-      parseCreateDigitalHumanRequest({
-        name: "Main Agent",
-        skills: ["planner", 1]
+
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 400 })
+    );
+  });
+
+  it("GET :id with empty id returns 400", async () => {
+    const { createDigitalHumanRouter } = await importRouterWithLogicMock({});
+    const router = createDigitalHumanRouter() as Router;
+    const handler = findHandler(router, "get", detailPath);
+    const response = createResponseDouble();
+    const next = vi.fn<NextFunction>();
+
+    await handler?.(
+      { params: { id: "  " } } as unknown as Request,
+      response,
+      next
+    );
+
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 400 })
+    );
+  });
+
+  it("POST with incomplete channel returns 400", async () => {
+    const { createDigitalHumanRouter } = await importRouterWithLogicMock({});
+    const router = createDigitalHumanRouter() as Router;
+    const handler = findHandler(router, "post", listPath);
+    const response = createResponseDouble();
+    const next = vi.fn<NextFunction>();
+
+    await handler?.(
+      {
+        body: {
+          name: "ok",
+          channel: { appId: "only" }
+        }
+      } as Request,
+      response,
+      next
+    );
+
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 400 })
+    );
+  });
+
+  it("POST with invalid channel.type returns 400", async () => {
+    const { createDigitalHumanRouter } = await importRouterWithLogicMock({});
+    const router = createDigitalHumanRouter() as Router;
+    const handler = findHandler(router, "post", listPath);
+    const response = createResponseDouble();
+    const next = vi.fn<NextFunction>();
+
+    await handler?.(
+      {
+        body: {
+          name: "ok",
+          channel: { type: "slack", appId: "a", appSecret: "b" }
+        }
+      } as Request,
+      response,
+      next
+    );
+
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 400 })
+    );
+  });
+
+  it("POST trims whitespace in channel.type", async () => {
+    const createDigitalHuman = vi.fn().mockResolvedValue({ id: "x", name: "n" });
+    const { createDigitalHumanRouter } = await importRouterWithLogicMock({
+      createDigitalHuman
+    });
+    const router = createDigitalHumanRouter() as Router;
+    const handler = findHandler(router, "post", listPath);
+    const response = createResponseDouble();
+    const next = vi.fn<NextFunction>();
+
+    await handler?.(
+      {
+        body: {
+          name: "n",
+          channel: { type: "  dingtalk  ", appId: "a", appSecret: "b" }
+        }
+      } as Request,
+      response,
+      next
+    );
+
+    expect(createDigitalHuman).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: { type: "dingtalk", appId: "a", appSecret: "b" }
       })
-    ).toThrow('Field "skills[1]" must be a string');
+    );
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("POST with non-string channel.type returns 400", async () => {
+    const { createDigitalHumanRouter } = await importRouterWithLogicMock({});
+    const router = createDigitalHumanRouter() as Router;
+    const handler = findHandler(router, "post", listPath);
+    const response = createResponseDouble();
+    const next = vi.fn<NextFunction>();
+
+    await handler?.(
+      {
+        body: {
+          name: "ok",
+          channel: { type: 1, appId: "a", appSecret: "b" }
+        }
+      } as Request,
+      response,
+      next
+    );
+
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 400 })
+    );
+  });
+
+  it("POST with invalid bkn entry returns 400", async () => {
+    const { createDigitalHumanRouter } = await importRouterWithLogicMock({});
+    const router = createDigitalHumanRouter() as Router;
+    const handler = findHandler(router, "post", listPath);
+    const response = createResponseDouble();
+    const next = vi.fn<NextFunction>();
+
+    await handler?.(
+      {
+        body: {
+          name: "ok",
+          bkn: [{ name: "n" }]
+        }
+      } as Request,
+      response,
+      next
+    );
+
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 400 })
+    );
+  });
+
+  it("POST forwards full valid payload to logic", async () => {
+    const createDigitalHuman = vi
+      .fn()
+      .mockResolvedValue({ id: "x", name: "n", soul: "s" });
+    const { createDigitalHumanRouter } = await importRouterWithLogicMock({
+      createDigitalHuman
+    });
+    const router = createDigitalHumanRouter() as Router;
+    const handler = findHandler(router, "post", listPath);
+    const response = createResponseDouble();
+    const next = vi.fn<NextFunction>();
+
+    await handler?.(
+      {
+        body: {
+          name: "n",
+          creature: "c",
+          soul: "s",
+          skills: ["sk"],
+          bkn: [{ name: "bn", url: "https://u" }],
+          channel: { type: "dingtalk", appId: "i", appSecret: "sec" }
+        }
+      } as Request,
+      response,
+      next
+    );
+
+    expect(createDigitalHuman).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "n",
+        creature: "c",
+        soul: "s",
+        skills: ["sk"],
+        bkn: [{ name: "bn", url: "https://u" }],
+        channel: { type: "dingtalk", appId: "i", appSecret: "sec" }
+      })
+    );
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("PUT forwards skills and bkn patches", async () => {
+    const updateDigitalHuman = vi.fn().mockResolvedValue({ id: "i", name: "n", soul: "" });
+    const { createDigitalHumanRouter } = await importRouterWithLogicMock({
+      updateDigitalHuman
+    });
+    const router = createDigitalHumanRouter() as Router;
+    const handler = findHandler(router, "put", detailPath);
+    const response = createResponseDouble();
+    const next = vi.fn<NextFunction>();
+
+    await handler?.(
+      {
+        params: { id: "i" },
+        body: {
+          skills: ["a", "b"],
+          bkn: [{ name: "x", url: "https://y" }]
+        }
+      } as unknown as Request,
+      response,
+      next
+    );
+
+    expect(updateDigitalHuman).toHaveBeenCalledWith("i", {
+      skills: ["a", "b"],
+      bkn: [{ name: "x", url: "https://y" }]
+    });
+    expect(next).not.toHaveBeenCalled();
   });
 });

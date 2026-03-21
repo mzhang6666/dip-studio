@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  createAgentsAddRequest,
+  createAgentsCreateRequest,
+  createAgentsDeleteRequest,
+  createAgentsFilesGetRequest,
+  createAgentsFilesSetRequest,
+  createConfigGetRequest,
+  createConfigPatchRequest,
   OpenClawAgentsGatewayAdapter,
   createAgentsListRequest
 } from "./openclaw-agents-adapter";
@@ -17,13 +22,12 @@ describe("createAgentsListRequest", () => {
   });
 });
 
-describe("createAgentsAddRequest", () => {
+describe("createAgentsCreateRequest", () => {
   it("builds the agents.create JSON RPC frame", () => {
     expect(
-      createAgentsAddRequest("req-4", {
+      createAgentsCreateRequest("req-4", {
         name: "Main Agent",
-        workspace: "main",
-        bind: ["telegram:default"]
+        workspace: "/path/to/main"
       })
     ).toEqual({
       type: "req",
@@ -31,8 +35,7 @@ describe("createAgentsAddRequest", () => {
       method: "agents.create",
       params: {
         name: "Main Agent",
-        workspace: "main",
-        bind: ["telegram:default"]
+        workspace: "/path/to/main"
       }
     });
   });
@@ -77,24 +80,116 @@ describe("OpenClawAgentsGatewayAdapter", () => {
 
   it("delegates agents.create to the gateway port", async () => {
     const gatewayPort = {
-      invoke: vi.fn().mockResolvedValue(undefined)
+      invoke: vi.fn().mockResolvedValue({
+        ok: true,
+        agentId: "main",
+        name: "Main Agent",
+        workspace: "/path/to/main"
+      })
     };
     const adapter = new OpenClawAgentsGatewayAdapter(gatewayPort);
 
     await expect(
-      adapter.addAgent({
+      adapter.createAgent({
         name: "Main Agent",
-        workspace: "main",
-        bind: ["telegram:default"]
+        workspace: "/path/to/main"
       })
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({
+      ok: true,
+      agentId: "main",
+      name: "Main Agent",
+      workspace: "/path/to/main"
+    });
 
     expect(gatewayPort.invoke).toHaveBeenNthCalledWith(
       1,
-      createAgentsAddRequest("agents.create", {
+      createAgentsCreateRequest("agents.create", {
         name: "Main Agent",
-        workspace: "main",
-        bind: ["telegram:default"]
+        workspace: "/path/to/main"
+      })
+    );
+  });
+
+  it("delegates agents.delete to the gateway port", async () => {
+    const gatewayPort = {
+      invoke: vi.fn().mockResolvedValue({ ok: true })
+    };
+    const adapter = new OpenClawAgentsGatewayAdapter(gatewayPort);
+
+    await adapter.deleteAgent({ agentId: "x", deleteFiles: true });
+
+    expect(gatewayPort.invoke).toHaveBeenCalledWith(
+      createAgentsDeleteRequest("agents.delete", {
+        agentId: "x",
+        deleteFiles: true
+      })
+    );
+  });
+
+  it("delegates agents.files.get to the gateway port", async () => {
+    const gatewayPort = {
+      invoke: vi.fn().mockResolvedValue({
+        file: { name: "IDENTITY.md", content: "x" }
+      })
+    };
+    const adapter = new OpenClawAgentsGatewayAdapter(gatewayPort);
+
+    await adapter.getAgentFile({ agentId: "a", name: "IDENTITY.md" });
+
+    expect(gatewayPort.invoke).toHaveBeenCalledWith(
+      createAgentsFilesGetRequest("agents.files.get", {
+        agentId: "a",
+        name: "IDENTITY.md"
+      })
+    );
+  });
+
+  it("delegates agents.files.set to the gateway port", async () => {
+    const gatewayPort = {
+      invoke: vi.fn().mockResolvedValue({ file: { name: "SOUL.md" } })
+    };
+    const adapter = new OpenClawAgentsGatewayAdapter(gatewayPort);
+
+    await adapter.setAgentFile({
+      agentId: "a",
+      name: "SOUL.md",
+      content: "body"
+    });
+
+    expect(gatewayPort.invoke).toHaveBeenCalledWith(
+      createAgentsFilesSetRequest("agents.files.set", {
+        agentId: "a",
+        name: "SOUL.md",
+        content: "body"
+      })
+    );
+  });
+
+  it("delegates config.get to the gateway port", async () => {
+    const gatewayPort = {
+      invoke: vi.fn().mockResolvedValue({ config: {}, hash: "h" })
+    };
+    const adapter = new OpenClawAgentsGatewayAdapter(gatewayPort);
+
+    await adapter.getConfig();
+
+    expect(gatewayPort.invoke).toHaveBeenCalledWith(
+      createConfigGetRequest("config.get")
+    );
+  });
+
+  it("delegates config.patch to the gateway port", async () => {
+    const gatewayPort = {
+      invoke: vi.fn().mockResolvedValue({ ok: true })
+    };
+    const adapter = new OpenClawAgentsGatewayAdapter(gatewayPort);
+
+    await adapter.patchConfig({ raw: "{}", baseHash: "h" });
+
+    expect(gatewayPort.invoke).toHaveBeenCalledWith(
+      createConfigPatchRequest("config.patch", {
+        raw: "{}",
+        baseHash: "h"
       })
     );
   });

@@ -64,6 +64,246 @@ export interface OpenClawAgentsListResult {
 }
 
 /**
+ * Parameters for the `agents.create` OpenClaw RPC method.
+ */
+export interface OpenClawAgentsCreateParams {
+  /**
+   * Display name for the new agent.
+   */
+  name: string;
+
+  /**
+   * Workspace directory path for the new agent.
+   */
+  workspace: string;
+
+  /**
+   * Optional emoji marker for the agent.
+   */
+  emoji?: string;
+
+  /**
+   * Optional avatar identifier for the agent.
+   */
+  avatar?: string;
+}
+
+/**
+ * Matches the `AgentsCreateResult` schema from OpenClaw.
+ */
+export interface OpenClawAgentsCreateResult {
+  /**
+   * Indicates whether the creation succeeded.
+   */
+  ok: boolean;
+
+  /**
+   * Stable identifier assigned to the newly created agent.
+   */
+  agentId: string;
+
+  /**
+   * Display name of the created agent.
+   */
+  name: string;
+
+  /**
+   * Workspace directory of the created agent.
+   */
+  workspace: string;
+}
+
+/**
+ * Parameters for the `agents.delete` OpenClaw RPC method.
+ */
+export interface OpenClawAgentsDeleteParams {
+  /**
+   * Identifier of the agent to delete.
+   */
+  agentId: string;
+
+  /**
+   * Whether to delete workspace files along with the agent. Defaults to `true`.
+   */
+  deleteFiles?: boolean;
+}
+
+/**
+ * Matches the `AgentsDeleteResult` schema from OpenClaw.
+ */
+export interface OpenClawAgentsDeleteResult {
+  /**
+   * Indicates whether the deletion succeeded.
+   */
+  ok: boolean;
+
+  /**
+   * Identifier of the deleted agent.
+   */
+  agentId: string;
+
+  /**
+   * Number of session bindings removed alongside the agent.
+   */
+  removedBindings: number;
+}
+
+/**
+ * Parameters for the `agents.files.get` OpenClaw RPC method.
+ */
+export interface OpenClawAgentsFilesGetParams {
+  /**
+   * Identifier of the agent whose file to read.
+   */
+  agentId: string;
+
+  /**
+   * Workspace filename to read (e.g. "IDENTITY.md", "SOUL.md").
+   */
+  name: string;
+}
+
+/**
+ * File metadata returned by `agents.files.get` and `agents.files.set`.
+ */
+export interface OpenClawAgentFile {
+  /**
+   * Workspace filename.
+   */
+  name: string;
+
+  /**
+   * Absolute path on disk.
+   */
+  path: string;
+
+  /**
+   * Whether the file is missing from disk.
+   */
+  missing: boolean;
+
+  /**
+   * File size in bytes when present.
+   */
+  size?: number;
+
+  /**
+   * Last modification timestamp in epoch milliseconds.
+   */
+  updatedAtMs?: number;
+
+  /**
+   * UTF-8 content of the file.
+   */
+  content?: string;
+}
+
+/**
+ * Matches the `agents.files.get` result schema from OpenClaw.
+ */
+export interface OpenClawAgentsFilesGetResult {
+  /**
+   * Agent identifier.
+   */
+  agentId: string;
+
+  /**
+   * Workspace directory path.
+   */
+  workspace: string;
+
+  /**
+   * The retrieved file metadata and content.
+   */
+  file: OpenClawAgentFile;
+}
+
+/**
+ * Parameters for the `agents.files.set` OpenClaw RPC method.
+ */
+export interface OpenClawAgentsFilesSetParams {
+  /**
+   * Identifier of the agent whose file to write.
+   */
+  agentId: string;
+
+  /**
+   * Workspace filename to write (e.g. "IDENTITY.md", "SOUL.md").
+   */
+  name: string;
+
+  /**
+   * UTF-8 content to write to the file.
+   */
+  content: string;
+}
+
+/**
+ * Matches the `agents.files.set` result schema from OpenClaw.
+ */
+export interface OpenClawAgentsFilesSetResult {
+  /**
+   * Indicates whether the write succeeded.
+   */
+  ok: boolean;
+
+  /**
+   * Agent identifier.
+   */
+  agentId: string;
+
+  /**
+   * Workspace directory path.
+   */
+  workspace: string;
+
+  /**
+   * The written file metadata and content.
+   */
+  file: OpenClawAgentFile;
+}
+
+/**
+ * Matches the `config.get` result schema from OpenClaw.
+ */
+export interface OpenClawConfigGetResult {
+  /**
+   * Serialized JSON config content.
+   */
+  raw: string;
+
+  /**
+   * Content hash used for optimistic concurrency control.
+   */
+  hash: string;
+}
+
+/**
+ * Parameters for the `config.patch` OpenClaw RPC method.
+ */
+export interface OpenClawConfigPatchParams {
+  /**
+   * Serialized JSON partial config to merge.
+   */
+  raw: string;
+
+  /**
+   * Base hash from a prior `config.get` for optimistic locking.
+   */
+  baseHash: string;
+}
+
+/**
+ * Matches the `config.patch` result schema from OpenClaw.
+ */
+export interface OpenClawConfigPatchResult {
+  /**
+   * Indicates whether the patch succeeded.
+   */
+  ok: boolean;
+}
+
+/**
  * Represents a request frame sent to the OpenClaw gateway.
  */
 export interface OpenClawRequestFrame {
@@ -99,24 +339,4 @@ export interface OpenClawGatewayPort {
    * @returns The successful response payload.
    */
   invoke<T>(request: OpenClawRequestFrame): Promise<T>;
-}
-
-/**
- * Parameters used to provision an OpenClaw isolated agent.
- */
-export interface OpenClawAgentAddParams {
-  /**
-   * Human-readable agent name.
-   */
-  name: string;
-
-  /**
-   * Agent workspace path or identifier forwarded to `--workspace`.
-   */
-  workspace: string;
-
-  /**
-   * Optional binding specs in `channel[:accountId]` format.
-   */
-  bind?: string[];
 }

@@ -1,38 +1,32 @@
-import {
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  realpathSync,
-  symlinkSync
-} from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  DefaultDigitalHumanLogic,
-  FileSystemDigitalHumanWorkspaceStore,
-  ensureSkillSourceExists,
-  isMissingFileError,
-  mapAgentsToDigitalHumans
-} from "./digital-human";
 import { HttpError } from "../errors/http-error";
 
 /**
- * Creates a temporary directory for file system tests.
- *
- * @returns The absolute temporary directory path.
+ * Mutable fake home for `node:os` `homedir` (see hoisted mock below).
  */
-function createTempDirectory(): string {
-  const directoryPath = mkdtempSync(join(tmpdir(), "dip-studio-"));
+let fakeHomeForOsMock = "/tmp";
 
-  return directoryPath;
-}
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  return {
+    ...actual,
+    homedir: (): string => fakeHomeForOsMock
+  };
+});
+
+import {
+  DefaultDigitalHumanLogic,
+  mapAgentsToDigitalHumans,
+  resolveDefaultWorkspace
+} from "./digital-human";
 
 describe("DefaultDigitalHumanLogic", () => {
-  it("fetches agents from the adapter and maps them to digital humans", async () => {
+  it("fetches agents and enriches list with IDENTITY.md creature", async () => {
     const openClawAgentsAdapter = {
       listAgents: vi.fn().mockResolvedValue({
         defaultId: "main",
@@ -47,142 +41,59 @@ describe("DefaultDigitalHumanLogic", () => {
             }
           }
         ]
+      }),
+      getAgentFile: vi.fn().mockResolvedValue({
+        file: {
+          content: "# IDENTITY.md\n\n- Name: From File\n- Creature: Engineer\n"
+        }
       })
     };
-    const logic = new DefaultDigitalHumanLogic(openClawAgentsAdapter);
+    const logic = new DefaultDigitalHumanLogic({
+      openClawAgentsAdapter: openClawAgentsAdapter as never,
+      skillStorePath: "/tmp/skills"
+    });
 
     await expect(logic.listDigitalHumans()).resolves.toEqual([
       {
         id: "main",
-        name: "Main Agent",
-        avatar: "https://example.com/main.png"
+        name: "From File",
+        creature: "Engineer"
       }
     ]);
     expect(openClawAgentsAdapter.listAgents).toHaveBeenCalledOnce();
+    expect(openClawAgentsAdapter.getAgentFile).toHaveBeenCalledWith({
+      agentId: "main",
+      name: "IDENTITY.md"
+    });
   });
 
-  it("creates a digital human and synchronizes its workspace", async () => {
+  it("list falls back when IDENTITY fetch fails", async () => {
     const openClawAgentsAdapter = {
-      listAgents: vi.fn(),
-      addAgent: vi.fn().mockResolvedValue(undefined)
+      listAgents: vi.fn().mockResolvedValue({
+        defaultId: "main",
+        mainKey: "sender",
+        scope: "per-sender",
+        agents: [
+          {
+            id: "a1",
+            name: "Listed Name"
+          }
+        ]
+      }),
+      getAgentFile: vi.fn().mockRejectedValue(new Error("network"))
     };
-    const workspaceStore = {
-      syncWorkspace: vi.fn().mockResolvedValue("workspace/main")
-    };
-    const logic = new DefaultDigitalHumanLogic(
-      openClawAgentsAdapter,
-      workspaceStore
-    );
-
-    await expect(
-      logic.createDigitalHuman({
-        id: "main",
-        name: "Main Agent",
-        avatar: "https://example.com/main.png",
-        identity: "# Identity",
-        soul: "# Soul",
-        skills: ["planner"]
-      })
-    ).resolves.toEqual({
-      id: "main",
-      name: "Main Agent",
-      avatar: "https://example.com/main.png",
-      skills: ["planner"],
-      workspace: "workspace/main"
+    const logic = new DefaultDigitalHumanLogic({
+      openClawAgentsAdapter: openClawAgentsAdapter as never,
+      skillStorePath: "/tmp/skills"
     });
 
-    expect(openClawAgentsAdapter.addAgent).toHaveBeenCalledWith({
-      name: "Main Agent",
-      workspace: "main"
-    });
-    expect(workspaceStore.syncWorkspace).toHaveBeenCalledWith(
+    await expect(logic.listDigitalHumans()).resolves.toEqual([
       {
-        id: "main",
-        name: "Main Agent",
-        avatar: "https://example.com/main.png",
-        identity: "# Identity",
-        soul: "# Soul",
-        skills: ["planner"]
-      },
-      "main"
-    );
-  });
-
-  it("creates a digital human without optional metadata", async () => {
-    const openClawAgentsAdapter = {
-      listAgents: vi.fn(),
-      addAgent: vi.fn().mockResolvedValue(undefined)
-    };
-    const workspaceStore = {
-      syncWorkspace: vi.fn().mockResolvedValue("workspace/generated-id")
-    };
-    const logic = new DefaultDigitalHumanLogic(
-      openClawAgentsAdapter,
-      workspaceStore
-    );
-
-    const result = await logic.createDigitalHuman({
-      id: "generated-id",
-      name: "Main Agent"
-    });
-
-    expect(result).toEqual({
-      id: "generated-id",
-      name: "Main Agent",
-      avatar: undefined,
-      skills: [],
-      workspace: "workspace/generated-id"
-    });
-    expect(openClawAgentsAdapter.addAgent).toHaveBeenCalledWith({
-      name: "Main Agent",
-      workspace: "generated-id"
-    });
-  });
-});
-
-describe("FileSystemDigitalHumanWorkspaceStore", () => {
-  it("writes markdown files and reconciles skills to match the request", async () => {
-    const workspaceRoot = createTempDirectory();
-    const skillStorePath = join(
-      workspaceRoot,
-      "__internal_skill_agent__",
-      "skill-store"
-    );
-    const workspacePath = join(workspaceRoot, "main");
-    const skillsPath = join(workspacePath, "skills");
-
-    mkdirSync(join(skillStorePath, "planner"), { recursive: true });
-    mkdirSync(join(skillStorePath, "writer"), { recursive: true });
-    mkdirSync(skillsPath, { recursive: true });
-    symlinkSync(
-      "../__internal_skill_agent__/skill-store/writer",
-      join(skillsPath, "obsolete"),
-      "dir"
-    );
-
-    const store = new FileSystemDigitalHumanWorkspaceStore(workspaceRoot);
-
-    await expect(
-      store.syncWorkspace(
-        {
-          name: "Main Agent",
-          identity: "# Identity",
-          soul: "# Soul",
-          skills: ["planner", "writer"]
-        },
-        "main"
-      )
-    ).resolves.toBe(workspacePath);
-
-    expect(readFileSync(join(workspacePath, "IDENTITY.md"), "utf8")).toBe("# Identity");
-    expect(readFileSync(join(workspacePath, "SOUL.md"), "utf8")).toBe("# Soul");
-    expect(readdirSync(skillsPath).sort()).toEqual(["planner", "writer"]);
-    expect(realpathSync(join(skillsPath, "planner"))).toBe(
-      realpathSync(join(skillStorePath, "planner"))
-    );
-    expect(realpathSync(join(skillsPath, "writer"))).toBe(
-      realpathSync(join(skillStorePath, "writer"))
-    );
+        id: "a1",
+        name: "Listed Name",
+        creature: undefined
+      }
+    ]);
   });
 });
 
@@ -207,12 +118,12 @@ describe("mapAgentsToDigitalHumans", () => {
       {
         id: "main",
         name: "Main Agent",
-        avatar: "https://example.com/main.png"
+        creature: undefined
       }
     ]);
   });
 
-  it("falls back to identity name, agent id and avatar variants when fields are missing", () => {
+  it("falls back to identity name and agent id when fields are missing", () => {
     expect(
       mapAgentsToDigitalHumans({
         defaultId: "main",
@@ -222,8 +133,7 @@ describe("mapAgentsToDigitalHumans", () => {
           {
             id: "identity-name",
             identity: {
-              name: "Identity Name",
-              avatar: "https://example.com/identity-avatar.png"
+              name: "Identity Name"
             }
           },
           {
@@ -235,29 +145,619 @@ describe("mapAgentsToDigitalHumans", () => {
       {
         id: "identity-name",
         name: "Identity Name",
-        avatar: "https://example.com/identity-avatar.png"
+        creature: undefined
       },
       {
         id: "id-fallback",
         name: "id-fallback",
-        avatar: undefined
+        creature: undefined
       }
     ]);
   });
 });
 
-describe("ensureSkillSourceExists", () => {
-  it("throws a 400 HttpError when the skill does not exist", async () => {
-    await expect(
-      ensureSkillSourceExists("/missing/skill", "missing-skill")
-    ).rejects.toEqual(new HttpError(400, "Unknown skill: missing-skill"));
+describe("resolveDefaultWorkspace", () => {
+  it("places workspace under ~/.openclaw/<uuid>", () => {
+    const id = "550e8400-e29b-41d4-a716-446655440000";
+    expect(resolveDefaultWorkspace(id)).toBe(join(fakeHomeForOsMock, ".openclaw", id));
   });
 });
 
-describe("isMissingFileError", () => {
-  it("detects ENOENT file system errors", () => {
-    expect(isMissingFileError({ code: "ENOENT" })).toBe(true);
-    expect(isMissingFileError({ code: "EACCES" })).toBe(false);
-    expect(isMissingFileError("ENOENT")).toBe(false);
+describe("DefaultDigitalHumanLogic lifecycle (filesystem + adapter)", () => {
+  let fakeHome: string;
+
+  beforeEach(() => {
+    fakeHome = mkdtempSync(join(tmpdir(), "dip-dh-"));
+    fakeHomeForOsMock = fakeHome;
+  });
+
+  afterEach(() => {
+    fakeHomeForOsMock = "/tmp";
+    try {
+      rmSync(fakeHome, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  });
+
+  it("getDigitalHuman reads template fields and skills", async () => {
+    const id = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+    const ws = resolveDefaultWorkspace(id);
+    mkdirSync(join(ws, "skills", "s1"), { recursive: true });
+    writeFileSync(
+      join(ws, "IDENTITY.md"),
+      "- Name: Alice\n- Creature: QA\n",
+      "utf8"
+    );
+    writeFileSync(join(ws, "SOUL.md"), "Soul text\n", "utf8");
+
+    const adapter = {
+      listAgents: vi.fn(),
+      createAgent: vi.fn(),
+      deleteAgent: vi.fn(),
+      getAgentFile: vi.fn().mockImplementation(async ({ name }: { name: string }) => ({
+        file: { content: readFileSync(join(ws, name), "utf8") }
+      })),
+      setAgentFile: vi.fn(),
+      getConfig: vi.fn(),
+      patchConfig: vi.fn()
+    };
+
+    const logic = new DefaultDigitalHumanLogic({
+      openClawAgentsAdapter: adapter as never,
+      skillStorePath: join(fakeHome, "skills-store")
+    });
+
+    await expect(logic.getDigitalHuman(id)).resolves.toMatchObject({
+      id,
+      name: "Alice",
+      creature: "QA",
+      soul: "Soul text\n",
+      skills: ["s1"]
+    });
+  });
+
+  it("getDigitalHuman includes channel when OpenClaw config binds feishu", async () => {
+    const id = "b1b2c3d4-e5f6-7890-abcd-ef1234567890";
+    const ws = resolveDefaultWorkspace(id);
+    mkdirSync(ws, { recursive: true });
+    writeFileSync(
+      join(ws, "IDENTITY.md"),
+      "- Name: Alice\n- Creature: QA\n",
+      "utf8"
+    );
+    writeFileSync(join(ws, "SOUL.md"), "Soul text\n", "utf8");
+
+    const configPath = join(fakeHome, "openclaw.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        bindings: [{ agentId: id, match: { channel: "feishu" } }],
+        channels: {
+          feishu: {
+            enabled: true,
+            appId: "app-1",
+            appSecret: "secret-1"
+          }
+        }
+      }),
+      "utf8"
+    );
+    const prev = process.env.OPENCLAW_CONFIG_PATH;
+    process.env.OPENCLAW_CONFIG_PATH = configPath;
+
+    try {
+      const adapter = {
+        listAgents: vi.fn(),
+        createAgent: vi.fn(),
+        deleteAgent: vi.fn(),
+        getAgentFile: vi.fn().mockImplementation(async ({ name }: { name: string }) => ({
+          file: { content: readFileSync(join(ws, name), "utf8") }
+        })),
+        setAgentFile: vi.fn(),
+        getConfig: vi.fn(),
+        patchConfig: vi.fn()
+      };
+
+      const logic = new DefaultDigitalHumanLogic({
+        openClawAgentsAdapter: adapter as never,
+        skillStorePath: join(fakeHome, "skills-store")
+      });
+
+      await expect(logic.getDigitalHuman(id)).resolves.toMatchObject({
+        id,
+        channel: { type: "feishu", appId: "app-1", appSecret: "secret-1" }
+      });
+    } finally {
+      if (prev === undefined) {
+        delete process.env.OPENCLAW_CONFIG_PATH;
+      } else {
+        process.env.OPENCLAW_CONFIG_PATH = prev;
+      }
+    }
+  });
+
+  it("getDigitalHuman omits channel when config JSON is invalid", async () => {
+    const id = "c1b2c3d4-e5f6-7890-abcd-ef1234567890";
+    const ws = resolveDefaultWorkspace(id);
+    mkdirSync(ws, { recursive: true });
+    writeFileSync(join(ws, "IDENTITY.md"), "- Name: A\n", "utf8");
+    writeFileSync(join(ws, "SOUL.md"), "x\n", "utf8");
+
+    const configPath = join(fakeHome, "bad.json");
+    writeFileSync(configPath, "{ not json", "utf8");
+    const prev = process.env.OPENCLAW_CONFIG_PATH;
+    process.env.OPENCLAW_CONFIG_PATH = configPath;
+
+    try {
+      const adapter = {
+        listAgents: vi.fn(),
+        createAgent: vi.fn(),
+        deleteAgent: vi.fn(),
+        getAgentFile: vi.fn().mockImplementation(async ({ name }: { name: string }) => ({
+          file: { content: readFileSync(join(ws, name), "utf8") }
+        })),
+        setAgentFile: vi.fn(),
+        getConfig: vi.fn(),
+        patchConfig: vi.fn()
+      };
+      const logic = new DefaultDigitalHumanLogic({
+        openClawAgentsAdapter: adapter as never,
+        skillStorePath: join(fakeHome, "skills-store")
+      });
+      const detail = await logic.getDigitalHuman(id);
+      expect(detail.channel).toBeUndefined();
+    } finally {
+      if (prev === undefined) {
+        delete process.env.OPENCLAW_CONFIG_PATH;
+      } else {
+        process.env.OPENCLAW_CONFIG_PATH = prev;
+      }
+    }
+  });
+
+  it("getDigitalHuman omits channel when binding channel key is unsupported", async () => {
+    const id = "a0b2c3d4-e5f6-7890-abcd-ef1234567890";
+    const ws = resolveDefaultWorkspace(id);
+    mkdirSync(ws, { recursive: true });
+    writeFileSync(join(ws, "IDENTITY.md"), "- Name: A\n", "utf8");
+    writeFileSync(join(ws, "SOUL.md"), "x\n", "utf8");
+
+    const configPath = join(fakeHome, "oc-unknown-ch.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        bindings: [{ agentId: id, match: { channel: "slack" } }],
+        channels: { slack: { appId: "a", appSecret: "b" } }
+      }),
+      "utf8"
+    );
+    const prev = process.env.OPENCLAW_CONFIG_PATH;
+    process.env.OPENCLAW_CONFIG_PATH = configPath;
+
+    try {
+      const adapter = {
+        listAgents: vi.fn(),
+        createAgent: vi.fn(),
+        deleteAgent: vi.fn(),
+        getAgentFile: vi.fn().mockImplementation(async ({ name }: { name: string }) => ({
+          file: { content: readFileSync(join(ws, name), "utf8") }
+        })),
+        setAgentFile: vi.fn(),
+        getConfig: vi.fn(),
+        patchConfig: vi.fn()
+      };
+      const logic = new DefaultDigitalHumanLogic({
+        openClawAgentsAdapter: adapter as never,
+        skillStorePath: join(fakeHome, "skills-store")
+      });
+      const detail = await logic.getDigitalHuman(id);
+      expect(detail.channel).toBeUndefined();
+    } finally {
+      if (prev === undefined) {
+        delete process.env.OPENCLAW_CONFIG_PATH;
+      } else {
+        process.env.OPENCLAW_CONFIG_PATH = prev;
+      }
+    }
+  });
+
+  it("getDigitalHuman omits channel when binding is for another agent", async () => {
+    const id = "d1b2c3d4-e5f6-7890-abcd-ef1234567890";
+    const ws = resolveDefaultWorkspace(id);
+    mkdirSync(ws, { recursive: true });
+    writeFileSync(join(ws, "IDENTITY.md"), "- Name: A\n", "utf8");
+    writeFileSync(join(ws, "SOUL.md"), "x\n", "utf8");
+
+    const configPath = join(fakeHome, "oc2.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        bindings: [{ agentId: "other-id", match: { channel: "feishu" } }],
+        channels: { feishu: { appId: "a", appSecret: "b" } }
+      }),
+      "utf8"
+    );
+    const prev = process.env.OPENCLAW_CONFIG_PATH;
+    process.env.OPENCLAW_CONFIG_PATH = configPath;
+
+    try {
+      const adapter = {
+        listAgents: vi.fn(),
+        createAgent: vi.fn(),
+        deleteAgent: vi.fn(),
+        getAgentFile: vi.fn().mockImplementation(async ({ name }: { name: string }) => ({
+          file: { content: readFileSync(join(ws, name), "utf8") }
+        })),
+        setAgentFile: vi.fn(),
+        getConfig: vi.fn(),
+        patchConfig: vi.fn()
+      };
+      const logic = new DefaultDigitalHumanLogic({
+        openClawAgentsAdapter: adapter as never,
+        skillStorePath: join(fakeHome, "skills-store")
+      });
+      const detail = await logic.getDigitalHuman(id);
+      expect(detail.channel).toBeUndefined();
+    } finally {
+      if (prev === undefined) {
+        delete process.env.OPENCLAW_CONFIG_PATH;
+      } else {
+        process.env.OPENCLAW_CONFIG_PATH = prev;
+      }
+    }
+  });
+
+  it("getDigitalHuman omits channel when feishu credentials are incomplete", async () => {
+    const id = "e1b2c3d4-e5f6-7890-abcd-ef1234567890";
+    const ws = resolveDefaultWorkspace(id);
+    mkdirSync(ws, { recursive: true });
+    writeFileSync(join(ws, "IDENTITY.md"), "- Name: A\n", "utf8");
+    writeFileSync(join(ws, "SOUL.md"), "x\n", "utf8");
+
+    const configPath = join(fakeHome, "oc3.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        bindings: [{ agentId: id, match: { channel: "feishu" } }],
+        channels: { feishu: { appId: "", appSecret: "only-secret" } }
+      }),
+      "utf8"
+    );
+    const prev = process.env.OPENCLAW_CONFIG_PATH;
+    process.env.OPENCLAW_CONFIG_PATH = configPath;
+
+    try {
+      const adapter = {
+        listAgents: vi.fn(),
+        createAgent: vi.fn(),
+        deleteAgent: vi.fn(),
+        getAgentFile: vi.fn().mockImplementation(async ({ name }: { name: string }) => ({
+          file: { content: readFileSync(join(ws, name), "utf8") }
+        })),
+        setAgentFile: vi.fn(),
+        getConfig: vi.fn(),
+        patchConfig: vi.fn()
+      };
+      const logic = new DefaultDigitalHumanLogic({
+        openClawAgentsAdapter: adapter as never,
+        skillStorePath: join(fakeHome, "skills-store")
+      });
+      const detail = await logic.getDigitalHuman(id);
+      expect(detail.channel).toBeUndefined();
+    } finally {
+      if (prev === undefined) {
+        delete process.env.OPENCLAW_CONFIG_PATH;
+      } else {
+        process.env.OPENCLAW_CONFIG_PATH = prev;
+      }
+    }
+  });
+
+  it("getDigitalHuman maps unknown agent errors to 404", async () => {
+    const adapter = {
+      listAgents: vi.fn(),
+      createAgent: vi.fn(),
+      deleteAgent: vi.fn(),
+      getAgentFile: vi.fn().mockRejectedValue(new Error("unknown agent id")),
+      setAgentFile: vi.fn(),
+      getConfig: vi.fn(),
+      patchConfig: vi.fn()
+    };
+    const logic = new DefaultDigitalHumanLogic({
+      openClawAgentsAdapter: adapter as never,
+      skillStorePath: "/tmp/x"
+    });
+
+    await expect(logic.getDigitalHuman("missing")).rejects.toMatchObject({
+      statusCode: 404
+    });
+  });
+
+  it("getDigitalHuman rethrows HttpError unchanged", async () => {
+    const forbidden = new HttpError(403, "forbidden");
+    const adapter = {
+      listAgents: vi.fn(),
+      createAgent: vi.fn(),
+      deleteAgent: vi.fn(),
+      getAgentFile: vi.fn().mockRejectedValue(forbidden),
+      setAgentFile: vi.fn(),
+      getConfig: vi.fn(),
+      patchConfig: vi.fn()
+    };
+    const logic = new DefaultDigitalHumanLogic({
+      openClawAgentsAdapter: adapter as never,
+      skillStorePath: "/tmp/x"
+    });
+
+    await expect(logic.getDigitalHuman("x")).rejects.toBe(forbidden);
+  });
+
+  it("deleteDigitalHuman delegates to deleteAgent", async () => {
+    const deleteAgent = vi.fn().mockResolvedValue({ ok: true });
+    const logic = new DefaultDigitalHumanLogic({
+      openClawAgentsAdapter: {
+        listAgents: vi.fn(),
+        createAgent: vi.fn(),
+        deleteAgent,
+        getAgentFile: vi.fn(),
+        setAgentFile: vi.fn(),
+        getConfig: vi.fn(),
+        patchConfig: vi.fn()
+      } as never,
+      skillStorePath: "/tmp/skills"
+    });
+
+    await logic.deleteDigitalHuman("agent-1", false);
+
+    expect(deleteAgent).toHaveBeenCalledWith({
+      agentId: "agent-1",
+      deleteFiles: false
+    });
+  });
+
+  it("createDigitalHuman writes markdown and links skills", async () => {
+    const skillStore = join(fakeHome, "skill-store", "sk1");
+    mkdirSync(skillStore, { recursive: true });
+    writeFileSync(join(skillStore, ".keep"), "", "utf8");
+
+    const createAgent = vi.fn().mockResolvedValue({ ok: true });
+    const logic = new DefaultDigitalHumanLogic({
+      openClawAgentsAdapter: {
+        listAgents: vi.fn(),
+        createAgent,
+        deleteAgent: vi.fn(),
+        getAgentFile: vi.fn(),
+        setAgentFile: vi.fn(),
+        getConfig: vi.fn(),
+        patchConfig: vi.fn()
+      } as never,
+      skillStorePath: join(fakeHome, "skill-store")
+    });
+
+    const result = await logic.createDigitalHuman({
+      name: "Bob",
+      creature: "Dev",
+      soul: "Hi",
+      skills: ["sk1"]
+    });
+
+    const ws = resolveDefaultWorkspace(result.id);
+    expect(readFileSync(join(ws, "IDENTITY.md"), "utf8")).toContain("Bob");
+    expect(readFileSync(join(ws, "SOUL.md"), "utf8")).toContain("Hi");
+    expect(createAgent).toHaveBeenCalledWith({
+      name: result.id,
+      workspace: ws
+    });
+  });
+
+  it("updateDigitalHuman merges patch and writes files", async () => {
+    const id = "f1e2d3c4-b5a6-7890-abcd-ef1234567890";
+    const ws = resolveDefaultWorkspace(id);
+    mkdirSync(ws, { recursive: true });
+    writeFileSync(
+      join(ws, "IDENTITY.md"),
+      "- Name: Old\n- Creature: X\n",
+      "utf8"
+    );
+    writeFileSync(join(ws, "SOUL.md"), "Old soul\n", "utf8");
+
+    const adapter = {
+      listAgents: vi.fn(),
+      createAgent: vi.fn(),
+      deleteAgent: vi.fn(),
+      getAgentFile: vi.fn().mockImplementation(async ({ name }: { name: string }) => ({
+        file: { content: readFileSync(join(ws, name), "utf8") }
+      })),
+      setAgentFile: vi.fn(),
+      getConfig: vi.fn(),
+      patchConfig: vi.fn()
+    };
+
+    const logic = new DefaultDigitalHumanLogic({
+      openClawAgentsAdapter: adapter as never,
+      skillStorePath: join(fakeHome, "skill-store")
+    });
+
+    await logic.updateDigitalHuman(id, { name: "New", soul: "New soul" });
+
+    expect(readFileSync(join(ws, "IDENTITY.md"), "utf8")).toContain("New");
+    expect(readFileSync(join(ws, "SOUL.md"), "utf8")).toContain("New soul");
+  });
+
+  it("createDigitalHuman binds channel when config path is writable", async () => {
+    const cfg = join(fakeHome, "openclaw.json");
+    writeFileSync(cfg, "{}\n", "utf8");
+    const prev = process.env.OPENCLAW_CONFIG_PATH;
+    const prevState = process.env.OPENCLAW_STATE_DIR;
+    delete process.env.OPENCLAW_STATE_DIR;
+    process.env.OPENCLAW_CONFIG_PATH = cfg;
+
+    const createAgent = vi.fn().mockResolvedValue({ ok: true });
+    const logic = new DefaultDigitalHumanLogic({
+      openClawAgentsAdapter: {
+        listAgents: vi.fn(),
+        createAgent,
+        deleteAgent: vi.fn(),
+        getAgentFile: vi.fn(),
+        setAgentFile: vi.fn(),
+        getConfig: vi.fn(),
+        patchConfig: vi.fn()
+      } as never,
+      skillStorePath: join(fakeHome, "skill-store")
+    });
+
+    await logic.createDigitalHuman({
+      name: "C",
+      channel: { appId: "a", appSecret: "b" }
+    });
+
+    const parsed = JSON.parse(readFileSync(cfg, "utf8")) as {
+      channels: { feishu: { appId: string } };
+    };
+    expect(parsed.channels.feishu.appId).toBe("a");
+
+    process.env.OPENCLAW_CONFIG_PATH = prev;
+    process.env.OPENCLAW_STATE_DIR = prevState;
+  });
+
+  it("createDigitalHuman writes channel to OPENCLAW_STATE_DIR when config path unset", async () => {
+    const stateDir = join(fakeHome, "state");
+    mkdirSync(stateDir, { recursive: true });
+    const prevCfg = process.env.OPENCLAW_CONFIG_PATH;
+    const prevState = process.env.OPENCLAW_STATE_DIR;
+    delete process.env.OPENCLAW_CONFIG_PATH;
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+
+    const createAgent = vi.fn().mockResolvedValue({ ok: true });
+    const logic = new DefaultDigitalHumanLogic({
+      openClawAgentsAdapter: {
+        listAgents: vi.fn(),
+        createAgent,
+        deleteAgent: vi.fn(),
+        getAgentFile: vi.fn(),
+        setAgentFile: vi.fn(),
+        getConfig: vi.fn(),
+        patchConfig: vi.fn()
+      } as never,
+      skillStorePath: join(fakeHome, "skill-store")
+    });
+
+    await logic.createDigitalHuman({
+      name: "D",
+      channel: { appId: "x", appSecret: "y" }
+    });
+
+    const cfgPath = join(stateDir, "openclaw.json");
+    const parsed = JSON.parse(readFileSync(cfgPath, "utf8")) as {
+      channels: { feishu: { appId: string } };
+    };
+    expect(parsed.channels.feishu.appId).toBe("x");
+
+    process.env.OPENCLAW_CONFIG_PATH = prevCfg;
+    process.env.OPENCLAW_STATE_DIR = prevState;
+  });
+
+  it("getDigitalHuman includes channel when OpenClaw config binds dingtalk", async () => {
+    const id = "f1b2c3d4-e5f6-7890-abcd-ef1234567890";
+    const ws = resolveDefaultWorkspace(id);
+    mkdirSync(ws, { recursive: true });
+    writeFileSync(
+      join(ws, "IDENTITY.md"),
+      "- Name: Alice\n- Creature: QA\n",
+      "utf8"
+    );
+    writeFileSync(join(ws, "SOUL.md"), "Soul text\n", "utf8");
+
+    const configPath = join(fakeHome, "oc-ding.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        bindings: [{ agentId: id, match: { channel: "dingtalk" } }],
+        channels: {
+          dingtalk: {
+            enabled: true,
+            appId: "dt-1",
+            appSecret: "dt-sec"
+          }
+        }
+      }),
+      "utf8"
+    );
+    const prev = process.env.OPENCLAW_CONFIG_PATH;
+    process.env.OPENCLAW_CONFIG_PATH = configPath;
+
+    try {
+      const adapter = {
+        listAgents: vi.fn(),
+        createAgent: vi.fn(),
+        deleteAgent: vi.fn(),
+        getAgentFile: vi.fn().mockImplementation(async ({ name }: { name: string }) => ({
+          file: { content: readFileSync(join(ws, name), "utf8") }
+        })),
+        setAgentFile: vi.fn(),
+        getConfig: vi.fn(),
+        patchConfig: vi.fn()
+      };
+
+      const logic = new DefaultDigitalHumanLogic({
+        openClawAgentsAdapter: adapter as never,
+        skillStorePath: join(fakeHome, "skills-store")
+      });
+
+      await expect(logic.getDigitalHuman(id)).resolves.toMatchObject({
+        id,
+        channel: { type: "dingtalk", appId: "dt-1", appSecret: "dt-sec" }
+      });
+    } finally {
+      if (prev === undefined) {
+        delete process.env.OPENCLAW_CONFIG_PATH;
+      } else {
+        process.env.OPENCLAW_CONFIG_PATH = prev;
+      }
+    }
+  });
+
+  it("createDigitalHuman binds dingtalk channel when type is dingtalk", async () => {
+    const cfg = join(fakeHome, "openclaw-ding.json");
+    writeFileSync(cfg, "{}\n", "utf8");
+    const prev = process.env.OPENCLAW_CONFIG_PATH;
+    const prevState = process.env.OPENCLAW_STATE_DIR;
+    delete process.env.OPENCLAW_STATE_DIR;
+    process.env.OPENCLAW_CONFIG_PATH = cfg;
+
+    const createAgent = vi.fn().mockResolvedValue({ ok: true });
+    const logic = new DefaultDigitalHumanLogic({
+      openClawAgentsAdapter: {
+        listAgents: vi.fn(),
+        createAgent,
+        deleteAgent: vi.fn(),
+        getAgentFile: vi.fn(),
+        setAgentFile: vi.fn(),
+        getConfig: vi.fn(),
+        patchConfig: vi.fn()
+      } as never,
+      skillStorePath: join(fakeHome, "skill-store")
+    });
+
+    const result = await logic.createDigitalHuman({
+      name: "E",
+      channel: { type: "dingtalk", appId: "dta", appSecret: "dts" }
+    });
+
+    const parsed = JSON.parse(readFileSync(cfg, "utf8")) as {
+      bindings: Array<{ agentId: string; match: { channel: string } }>;
+      channels: { dingtalk: { appId: string } };
+    };
+    expect(parsed.channels.dingtalk.appId).toBe("dta");
+    expect(parsed.bindings.some((b) => b.match.channel === "dingtalk")).toBe(true);
+    expect(result.channel).toEqual({
+      type: "dingtalk",
+      appId: "dta",
+      appSecret: "dts"
+    });
+
+    process.env.OPENCLAW_CONFIG_PATH = prev;
+    process.env.OPENCLAW_STATE_DIR = prevState;
   });
 });

@@ -16,7 +16,7 @@ paths:
       summary: 获取数字员工列表
       responses:
         "200":
-          description: 服务健康
+          description: 数字员工列表
           content:
             application/json:
               schema:
@@ -31,6 +31,8 @@ paths:
           $ref: '../common.schemas.yaml#/errors/NotFound'
         "409":
           $ref: '../common.schemas.yaml#/errors/Conflict'
+        "502":
+          $ref: '../common.schemas.yaml#/errors/BadGateway'
         "500":
           $ref: '../common.schemas.yaml#/errors/InternalServerError'
     post:
@@ -59,6 +61,104 @@ paths:
           $ref: '../common.schemas.yaml#/errors/NotFound'
         "409":
           $ref: '../common.schemas.yaml#/errors/Conflict'
+        "502":
+          $ref: '../common.schemas.yaml#/errors/BadGateway'
+        "500":
+          $ref: '../common.schemas.yaml#/errors/InternalServerError'
+
+  /digital-human/{id}:
+    get:
+      operationId: getDigitalHumanDetail
+      summary: 获取单个数字员工详情
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 数字员工 ID（与 OpenClaw agent id 一致）
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 详情
+          content:
+            application/json:
+              schema:
+                $ref: './digital-human.schemas.yaml#/components/schemas/DigitalHumanDetail'
+        "400":
+          $ref: '../common.schemas.yaml#/errors/InvalidParameter'
+        "401":
+          $ref: '../common.schemas.yaml#/errors/Unauthorized'
+        "403":
+          $ref: '../common.schemas.yaml#/errors/Forbidden'
+        "404":
+          $ref: '../common.schemas.yaml#/errors/NotFound'
+        "502":
+          $ref: '../common.schemas.yaml#/errors/BadGateway'
+        "500":
+          $ref: '../common.schemas.yaml#/errors/InternalServerError'
+    put:
+      operationId: updateDigitalHuman
+      summary: 更新数字员工（部分字段）
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: './digital-human.schemas.yaml#/components/schemas/UpdateDigitalHumanRequest'
+      responses:
+        "200":
+          description: 更新后的数字员工
+          content:
+            application/json:
+              schema:
+                $ref: './digital-human.schemas.yaml#/components/schemas/UpdateDigitalHumanResponse'
+        "400":
+          $ref: '../common.schemas.yaml#/errors/InvalidParameter'
+        "401":
+          $ref: '../common.schemas.yaml#/errors/Unauthorized'
+        "403":
+          $ref: '../common.schemas.yaml#/errors/Forbidden'
+        "404":
+          $ref: '../common.schemas.yaml#/errors/NotFound'
+        "502":
+          $ref: '../common.schemas.yaml#/errors/BadGateway'
+        "500":
+          $ref: '../common.schemas.yaml#/errors/InternalServerError'
+    delete:
+      operationId: deleteDigitalHuman
+      summary: 删除数字员工
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: deleteFiles
+          in: query
+          required: false
+          description: 是否删除工作区文件（默认 true）；传 false 保留仅删除 agent 配置
+          schema:
+            type: string
+            enum: ["true", "false"]
+      responses:
+        "204":
+          description: 删除成功，无响应体
+        "400":
+          $ref: '../common.schemas.yaml#/errors/InvalidParameter'
+        "401":
+          $ref: '../common.schemas.yaml#/errors/Unauthorized'
+        "403":
+          $ref: '../common.schemas.yaml#/errors/Forbidden'
+        "404":
+          $ref: '../common.schemas.yaml#/errors/NotFound'
+        "502":
+          $ref: '../common.schemas.yaml#/errors/BadGateway'
         "500":
           $ref: '../common.schemas.yaml#/errors/InternalServerError'
 
@@ -96,5 +196,7 @@ paths:
           $ref: '../common.schemas.yaml#/errors/NotFound'
         "409":
           $ref: '../common.schemas.yaml#/errors/Conflict'
+        "502":
+          $ref: '../common.schemas.yaml#/errors/BadGateway'
         "500":
           $ref: '../common.schemas.yaml#/errors/InternalServerError'
