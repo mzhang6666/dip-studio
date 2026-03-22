@@ -170,7 +170,7 @@ export interface CreateDigitalHumanRequest {
   soul?: string;
 
   /**
-   * Skill names to symlink into the agent workspace.
+   * Skill names to bind to the agent.
    */
   skills?: string[];
 
@@ -212,7 +212,7 @@ export interface CreateDigitalHumanResult {
   soul?: string;
 
   /**
-   * Skill names linked into the agent workspace.
+   * Skill names currently bound to the agent.
    */
   skills?: string[];
 
@@ -257,7 +257,7 @@ export interface DigitalHumanDetail {
   bkn?: BknEntry[];
 
   /**
-   * Skill names currently linked under `workspace/skills/`.
+   * Skill names currently configured on the agent.
    */
   skills?: string[];
 
@@ -288,7 +288,7 @@ export interface UpdateDigitalHumanRequest {
   soul?: string;
 
   /**
-   * When present, replaces the full skill link set (may be empty).
+   * When present, replaces the full skill set bound to the agent (may be empty).
    */
   skills?: string[];
 

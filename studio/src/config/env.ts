@@ -1,6 +1,3 @@
-import { homedir } from "node:os";
-import { join } from "node:path";
-
 import { config as loadDotEnvConfig } from "dotenv";
 
 let hasLoadedDotEnv = false;
@@ -58,7 +55,6 @@ export function getEnv(): {
   openClawGatewayToken?: string;
   openClawGatewayTimeoutMs: number;
   openClawWorkspaceDir: string;
-  openClawSkillStorePath: string;
 } {
   loadEnvFile();
 
@@ -77,8 +73,7 @@ export function getEnv(): {
     openClawGatewayHttpUrl: resolveGatewayHttpUrl(gatewayUrl),
     openClawGatewayToken: readOptionalString(process.env.OPENCLAW_GATEWAY_TOKEN),
     openClawGatewayTimeoutMs: resolveTimeoutMs(process.env.OPENCLAW_GATEWAY_TIMEOUT_MS),
-    openClawWorkspaceDir: resolveWorkspaceDir(process.env.OPENCLAW_WORKSPACE_DIR),
-    openClawSkillStorePath: resolveSkillStorePath(process.env.OPENCLAW_SKILL_STORE_PATH)
+    openClawWorkspaceDir: resolveWorkspaceDir(process.env.OPENCLAW_WORKSPACE_DIR)
   };
 }
 
@@ -232,20 +227,6 @@ export function readOptionalString(value: string | undefined): string | undefine
  */
 export function resolveWorkspaceDir(value: string | undefined): string {
   return readOptionalString(value) ?? "workspace";
-}
-
-/**
- * Resolves the central skill store directory path.
- *
- * @param value The raw environment variable value.
- * @returns An absolute path to the skill store directory.
- */
-export function resolveSkillStorePath(value: string | undefined): string {
-  const explicit = readOptionalString(value);
-  if (explicit) {
-    return explicit;
-  }
-  return join(homedir(), ".openclaw", "workspace-skill_agent", "skill-store");
 }
 
 /**

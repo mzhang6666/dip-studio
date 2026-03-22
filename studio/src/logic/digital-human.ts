@@ -40,7 +40,7 @@ export interface DigitalHumanLogic {
 
   /**
    * Retrieves the detail view for a single digital human: fields parsed
-   * from IDENTITY.md and SOUL.md, linked skills, and Feishu channel (when bound).
+   * from IDENTITY.md and SOUL.md, configured skills, and Feishu channel (when bound).
    *
    * @param id The digital human identifier.
    * @returns The detail payload (flat fields, no nested template).

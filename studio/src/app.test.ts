@@ -16,7 +16,6 @@ import {
   resolveGatewayPort,
   resolveGatewayProtocol,
   resolvePort,
-  resolveSkillStorePath,
   resolveTimeoutMs,
   resolveWorkspaceDir
 } from "./config/env";
@@ -936,8 +935,7 @@ describe("getEnv", () => {
       openClawGatewayHttpUrl: "http://127.0.0.1:19001/",
       openClawGatewayToken: undefined,
       openClawGatewayTimeoutMs: 6000,
-      openClawWorkspaceDir: resolveWorkspaceDir(process.env.OPENCLAW_WORKSPACE_DIR),
-      openClawSkillStorePath: resolveSkillStorePath(process.env.OPENCLAW_SKILL_STORE_PATH)
+      openClawWorkspaceDir: resolveWorkspaceDir(process.env.OPENCLAW_WORKSPACE_DIR)
     });
   });
 
@@ -953,8 +951,7 @@ describe("getEnv", () => {
     expect(getEnv()).toMatchObject({
       openClawGatewayUrl: "wss://gateway.example.com/ws",
       openClawGatewayHttpUrl: "https://gateway.example.com/ws",
-      openClawWorkspaceDir: "./openclaw-workspace",
-      openClawSkillStorePath: resolveSkillStorePath(process.env.OPENCLAW_SKILL_STORE_PATH)
+      openClawWorkspaceDir: "./openclaw-workspace"
     });
   });
 });
