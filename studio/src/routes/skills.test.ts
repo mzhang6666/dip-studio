@@ -58,17 +58,25 @@ function findHandler(
 }
 
 /**
- * Loads the router module with a mocked digital human logic.
+ * Loads the router module with a mocked agent skills logic.
  *
- * @param listEnabledSkills Mocked logic implementation.
+ * @param logic Mocked logic implementation.
  * @returns The imported router factory.
  */
 async function importRouterWithLogicMock(
-  listEnabledSkills: () => Promise<unknown>
+  logic: {
+    listEnabledSkills: () => Promise<unknown>;
+    listDigitalHumanSkills?: (id: string) => Promise<unknown>;
+  }
 ): Promise<typeof import("./skills")> {
-  vi.doMock("../logic/digital-human", () => ({
-    DefaultDigitalHumanLogic: vi.fn().mockImplementation(() => ({
-      listEnabledSkills
+  vi.doMock("../logic/agent-skills", () => ({
+    DefaultAgentSkillsLogic: vi.fn().mockImplementation(() => ({
+      listEnabledSkills: logic.listEnabledSkills,
+      listDigitalHumanSkills:
+        logic.listDigitalHumanSkills ?? vi.fn().mockResolvedValue([]),
+      listAvailableSkills: vi.fn().mockResolvedValue({ skills: [] }),
+      getAgentSkills: vi.fn().mockResolvedValue({ agentId: "a1", skills: [] }),
+      updateAgentSkills: vi.fn()
     }))
   }));
 
@@ -77,19 +85,24 @@ async function importRouterWithLogicMock(
 
 describe("createSkillsRouter", () => {
   const skillsPath = "/api/dip-studio/v1/skills";
+  const digitalHumanSkillsPath = "/api/dip-studio/v1/digital-human/:id/skills";
 
   it("registers GET /api/dip-studio/v1/skills", async () => {
-    const { createSkillsRouter } = await importRouterWithLogicMock(async () => []);
+    const { createSkillsRouter } = await importRouterWithLogicMock({
+      listEnabledSkills: async () => []
+    });
     const router = createSkillsRouter() as Router;
 
     expect(findHandler(router, "get", skillsPath)).toBeDefined();
   });
 
   it("returns available skills on success", async () => {
-    const { createSkillsRouter } = await importRouterWithLogicMock(async () => [
-      { name: "planner", description: "plan tasks" },
-      { name: "writer", description: "write docs" }
-    ]);
+    const { createSkillsRouter } = await importRouterWithLogicMock({
+      listEnabledSkills: async () => [
+        { name: "planner", description: "plan tasks" },
+        { name: "writer", description: "write docs" }
+      ]
+    });
     const router = createSkillsRouter() as Router;
     const handler = findHandler(router, "get", skillsPath);
     const response = createResponseDouble();
@@ -105,9 +118,68 @@ describe("createSkillsRouter", () => {
     expect(next).not.toHaveBeenCalled();
   });
 
+  it("registers GET /api/dip-studio/v1/digital-human/:id/skills", async () => {
+    const { createSkillsRouter } = await importRouterWithLogicMock({
+      listEnabledSkills: async () => []
+    });
+    const router = createSkillsRouter() as Router;
+
+    expect(findHandler(router, "get", digitalHumanSkillsPath)).toBeDefined();
+  });
+
+  it("returns configured digital human skills on success", async () => {
+    const { createSkillsRouter } = await importRouterWithLogicMock({
+      listEnabledSkills: async () => [],
+      listDigitalHumanSkills: async (id) => [
+        { name: `${id}-planner`, description: "plan tasks" }
+      ]
+    });
+    const router = createSkillsRouter() as Router;
+    const handler = findHandler(router, "get", digitalHumanSkillsPath);
+    const response = createResponseDouble();
+    const next = vi.fn<NextFunction>();
+
+    await handler?.(
+      { params: { id: "a1" } } as unknown as Request,
+      response,
+      next
+    );
+
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(response.json).toHaveBeenCalledWith([
+      { name: "a1-planner", description: "plan tasks" }
+    ]);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("rejects empty digital human id", async () => {
+    const { createSkillsRouter } = await importRouterWithLogicMock({
+      listEnabledSkills: async () => []
+    });
+    const router = createSkillsRouter() as Router;
+    const handler = findHandler(router, "get", digitalHumanSkillsPath);
+    const response = createResponseDouble();
+    const next = vi.fn<NextFunction>();
+
+    await handler?.(
+      { params: { id: " " } } as unknown as Request,
+      response,
+      next
+    );
+
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({
+        statusCode: 400,
+        message: "id path parameter is required"
+      })
+    );
+  });
+
   it("wraps unexpected errors", async () => {
-    const { createSkillsRouter } = await importRouterWithLogicMock(async () => {
-      throw new Error("boom");
+    const { createSkillsRouter } = await importRouterWithLogicMock({
+      listEnabledSkills: async () => {
+        throw new Error("boom");
+      }
     });
     const router = createSkillsRouter() as Router;
     const handler = findHandler(router, "get", skillsPath);
@@ -120,6 +192,32 @@ describe("createSkillsRouter", () => {
       expect.objectContaining({
         statusCode: 502,
         message: "Failed to query enabled skills"
+      })
+    );
+  });
+
+  it("wraps unexpected digital human skills errors", async () => {
+    const { createSkillsRouter } = await importRouterWithLogicMock({
+      listEnabledSkills: async () => [],
+      listDigitalHumanSkills: async () => {
+        throw new Error("boom");
+      }
+    });
+    const router = createSkillsRouter() as Router;
+    const handler = findHandler(router, "get", digitalHumanSkillsPath);
+    const response = createResponseDouble();
+    const next = vi.fn<NextFunction>();
+
+    await handler?.(
+      { params: { id: "a1" } } as unknown as Request,
+      response,
+      next
+    );
+
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({
+        statusCode: 502,
+        message: "Failed to query digital human skills"
       })
     );
   });

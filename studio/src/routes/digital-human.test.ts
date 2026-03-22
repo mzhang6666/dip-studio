@@ -61,7 +61,6 @@ function findHandler(
 type LogicMocks = Partial<{
   listDigitalHumans: () => Promise<unknown>;
   getDigitalHuman: (id: string) => Promise<unknown>;
-  listDigitalHumanSkills: (id: string) => Promise<unknown>;
   createDigitalHuman: (body: unknown) => Promise<unknown>;
   updateDigitalHuman: (id: string, patch: unknown) => Promise<unknown>;
   deleteDigitalHuman: (id: string, deleteFiles?: boolean) => Promise<void>;
@@ -87,8 +86,6 @@ async function importRouterWithLogicMock(
           name: "x",
           soul: ""
         }),
-      listDigitalHumanSkills:
-        logic.listDigitalHumanSkills ?? vi.fn().mockResolvedValue([]),
       createDigitalHuman:
         logic.createDigitalHuman ??
         vi.fn().mockResolvedValue({ id: "new", name: "n" }),
@@ -106,7 +103,6 @@ async function importRouterWithLogicMock(
 describe("createDigitalHumanRouter", () => {
   const listPath = "/api/dip-studio/v1/digital-human";
   const detailPath = "/api/dip-studio/v1/digital-human/:id";
-  const detailSkillsPath = "/api/dip-studio/v1/digital-human/:id/skills";
 
   it("registers GET /api/dip-studio/v1/digital-human", async () => {
     const { createDigitalHumanRouter } = await importRouterWithLogicMock({});
@@ -166,36 +162,6 @@ describe("createDigitalHumanRouter", () => {
       name: "N",
       soul: "s"
     });
-  });
-
-  it("GET :id/skills returns configured available skills", async () => {
-    const { createDigitalHumanRouter } = await importRouterWithLogicMock({
-      listDigitalHumanSkills: async (id) => [
-        {
-          name: `${id}-planner`,
-          description: "plan tasks"
-        }
-      ]
-    });
-    const router = createDigitalHumanRouter() as Router;
-    const handler = findHandler(router, "get", detailSkillsPath);
-    const response = createResponseDouble();
-    const next = vi.fn<NextFunction>();
-
-    await handler?.(
-      { params: { id: "a1" } } as unknown as Request,
-      response,
-      next
-    );
-
-    expect(response.status).toHaveBeenCalledWith(200);
-    expect(response.json).toHaveBeenCalledWith([
-      {
-        name: "a1-planner",
-        description: "plan tasks"
-      }
-    ]);
-    expect(next).not.toHaveBeenCalled();
   });
 
   it("POST create returns 201", async () => {
@@ -313,31 +279,6 @@ describe("createDigitalHumanRouter", () => {
 
     expect(next).toHaveBeenCalledWith(error);
     expect(response.status).not.toHaveBeenCalled();
-  });
-
-  it("GET :id/skills wraps unexpected errors", async () => {
-    const { createDigitalHumanRouter } = await importRouterWithLogicMock({
-      listDigitalHumanSkills: async () => {
-        throw new Error("boom");
-      }
-    });
-    const router = createDigitalHumanRouter() as Router;
-    const handler = findHandler(router, "get", detailSkillsPath);
-    const response = createResponseDouble();
-    const next = vi.fn<NextFunction>();
-
-    await handler?.(
-      { params: { id: "a1" } } as unknown as Request,
-      response,
-      next
-    );
-
-    expect(next).toHaveBeenCalledWith(
-      expect.objectContaining({
-        statusCode: 502,
-        message: "Failed to query digital human skills"
-      })
-    );
   });
 
   it("wraps unexpected errors with a gateway failure HttpError", async () => {

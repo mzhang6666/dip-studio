@@ -52,27 +52,6 @@ openssl pkey -in private.pem -pubout -out public.pem
 | [\].name | string | 技能名称 |
 | [\].description | string | 技能描述，可选 |
 
-#### 创建数字员工
-
-`POST /api/dip-studio/v1/digital-human`
-
-请求：`application/json`
-
-| 参数 | 类型 | 是否必填 | 说明 |
-| -- | -- | -- | -- |
-| id | string | 否 | 数字员工 ID；不传时后端自动生成 UUID |
-| name | string | 是 | 数字员工名称 |
-| avatar | string | 否 | 数字员工头像 |
-| identity | string | 否 | `IDENTITY.md` 内容 |
-| soul | string | 否 | `SOUL.md` 内容 |
-| skills | string[] | 否 | 技能名称列表 |
-
-响应：`201 application/json`
-
-| 参数 | 类型 | 说明 |
-| -- | -- | -- |
-| id | string | 数字员工 ID |
-
 #### 获取指定数字员工已配置技能列表
 
 `GET /api/dip-studio/v1/digital-human/{id}/skills`
@@ -89,6 +68,26 @@ openssl pkey -in private.pem -pubout -out public.pem
 | -- | -- | -- |
 | [\].name | string | 技能名称 |
 | [\].description | string | 技能描述，可选 |
+
+#### 创建数字员工
+
+`POST /api/dip-studio/v1/digital-human`
+
+请求：`application/json`
+
+| 参数 | 类型 | 是否必填 | 说明 |
+| -- | -- | -- | -- |
+| id | string | 否 | 数字员工 ID；不传时后端自动生成 UUID |
+| name | string | 是 | 数字员工名称 |
+| creature | string | 否 | 数字员工岗位/角色 |
+| soul | string | 否 | `SOUL.md` 内容 |
+| skills | string[] | 否 | 技能名称列表 |
+
+响应：`201 application/json`
+
+| 参数 | 类型 | 说明 |
+| -- | -- | -- |
+| id | string | 数字员工 ID |
 
 #### 进行数字员工对话
 

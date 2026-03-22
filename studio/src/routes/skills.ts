@@ -5,22 +5,44 @@ import {
 } from "../adapters/openclaw-agents-adapter";
 import { getEnv } from "../config/env";
 import { HttpError } from "../errors/http-error";
-import { OpenClawGatewayClient } from "../infra/openclaw-gateway-client";
 import {
-  DefaultDigitalHumanLogic,
-} from "../logic/digital-human";
+  DefaultOpenClawAgentSkillsHttpClient
+} from "../infra/openclaw-agent-skills-http-client";
+import { OpenClawGatewayClient } from "../infra/openclaw-gateway-client";
+import { DefaultAgentSkillsLogic } from "../logic/agent-skills";
 
 const env = getEnv();
-const digitalHumanLogic = new DefaultDigitalHumanLogic({
-  openClawAgentsAdapter: new OpenClawAgentsGatewayAdapter(
-    OpenClawGatewayClient.getInstance({
-      url: env.openClawGatewayUrl,
-      token: env.openClawGatewayToken,
-      timeoutMs: env.openClawGatewayTimeoutMs
-    })
-  ),
-  skillStorePath: env.openClawSkillStorePath
-});
+const openClawAgentsAdapter = new OpenClawAgentsGatewayAdapter(
+  OpenClawGatewayClient.getInstance({
+    url: env.openClawGatewayUrl,
+    token: env.openClawGatewayToken,
+    timeoutMs: env.openClawGatewayTimeoutMs
+  })
+);
+const agentSkillsLogic = new DefaultAgentSkillsLogic(
+  new DefaultOpenClawAgentSkillsHttpClient({
+    gatewayUrl: env.openClawGatewayHttpUrl,
+    token: env.openClawGatewayToken,
+    timeoutMs: env.openClawGatewayTimeoutMs
+  }),
+  openClawAgentsAdapter
+);
+
+/**
+ * Extracts the `id` path parameter handling the `string | string[]`
+ * type that Express may produce.
+ *
+ * @param idParam The raw path parameter value.
+ * @returns The first non-empty id string.
+ * @throws HttpError when the id is missing or empty.
+ */
+function resolveIdParam(idParam: string | string[] | undefined): string {
+  const id = Array.isArray(idParam) ? idParam[0] : idParam;
+  if (!id || id.trim().length === 0) {
+    throw new HttpError(400, "id path parameter is required");
+  }
+  return id;
+}
 
 /**
  * Builds the skills router.
@@ -38,7 +60,7 @@ export function createSkillsRouter(): Router {
       next: NextFunction
     ): Promise<void> => {
       try {
-        const result = await digitalHumanLogic.listEnabledSkills();
+        const result = await agentSkillsLogic.listEnabledSkills();
 
         response.status(200).json(result);
       } catch (error) {
@@ -46,6 +68,28 @@ export function createSkillsRouter(): Router {
           error instanceof HttpError
             ? error
             : new HttpError(502, "Failed to query enabled skills")
+        );
+      }
+    }
+  );
+
+  router.get(
+    "/api/dip-studio/v1/digital-human/:id/skills",
+    async (
+      request: Request,
+      response: Response,
+      next: NextFunction
+    ): Promise<void> => {
+      try {
+        const id = resolveIdParam(request.params.id);
+        const result = await agentSkillsLogic.listDigitalHumanSkills(id);
+
+        response.status(200).json(result);
+      } catch (error) {
+        next(
+          error instanceof HttpError
+            ? error
+            : new HttpError(502, "Failed to query digital human skills")
         );
       }
     }
