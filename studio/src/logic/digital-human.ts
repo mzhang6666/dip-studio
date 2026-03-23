@@ -90,6 +90,12 @@ export interface DigitalHumanLogicOptions {
    */
   agentSkillsLogic: AgentSkillsLogic;
 
+  /**
+   * Root directory used to create agent workspaces.
+   * Defaults to `~/.openclaw` when omitted.
+   */
+  openClawWorkspaceDir?: string;
+
 }
 
 /**
@@ -98,6 +104,7 @@ export interface DigitalHumanLogicOptions {
 export class DefaultDigitalHumanLogic implements DigitalHumanLogic {
   private readonly openClawAgentsAdapter: OpenClawAgentsAdapter;
   private readonly agentSkillsLogic: AgentSkillsLogic;
+  private readonly openClawWorkspaceDir?: string;
 
   /**
    * Creates the digital human logic.
@@ -107,6 +114,7 @@ export class DefaultDigitalHumanLogic implements DigitalHumanLogic {
   public constructor(options: DigitalHumanLogicOptions) {
     this.openClawAgentsAdapter = options.openClawAgentsAdapter;
     this.agentSkillsLogic = options.agentSkillsLogic;
+    this.openClawWorkspaceDir = options.openClawWorkspaceDir;
   }
 
   /**
@@ -217,7 +225,7 @@ export class DefaultDigitalHumanLogic implements DigitalHumanLogic {
     const uuid = randomUUID();
     const template = buildTemplate(request);
 
-    const workspace = resolveDefaultWorkspace(uuid);
+    const workspace = resolveDefaultWorkspace(uuid, this.openClawWorkspaceDir);
 
     await this.openClawAgentsAdapter.createAgent({
       name: uuid,
@@ -423,8 +431,12 @@ export class DefaultDigitalHumanLogic implements DigitalHumanLogic {
  * @param uuid The digital human UUID.
  * @returns The absolute path to the agent-specific workspace.
  */
-export function resolveDefaultWorkspace(uuid: string): string {
-  return join(homedir(), ".openclaw", uuid);
+export function resolveDefaultWorkspace(
+  uuid: string,
+  openClawWorkspaceDir?: string
+): string {
+  const baseDir = openClawWorkspaceDir?.trim() || join(homedir(), ".openclaw");
+  return join(baseDir, uuid);
 }
 
 /**

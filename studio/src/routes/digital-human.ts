@@ -41,7 +41,8 @@ const agentSkillsLogic = new DefaultAgentSkillsLogic(
 );
 const digitalHumanLogic = new DefaultDigitalHumanLogic({
   openClawAgentsAdapter,
-  agentSkillsLogic
+  agentSkillsLogic,
+  openClawWorkspaceDir: env.openClawWorkspaceDir
 });
 
 /**
