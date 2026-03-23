@@ -22,7 +22,6 @@ export interface SessionsListQuery {
   limit?: string;
   search?: string;
   agentId?: string;
-  includeDerivedTitles?: string;
   includeLastMessage?: string;
   activeMinutes?: string;
   label?: string;
@@ -137,9 +136,9 @@ export function createSessionsRouter(
     ): Promise<void> => {
       try {
         const key = readRequiredPathParam(request.params.key, "key");
-        const result = await logic.getSession(readSessionGetParams(key, request.query));
+        const session = await logic.getSessionSummary(key);
 
-        response.status(200).json(result);
+        response.status(200).json(session);
       } catch (error) {
         next(
           error instanceof HttpError
@@ -292,10 +291,6 @@ export function readSessionsListQuery(
     limit: parseOptionalNonNegativeIntegerString(query.limit, "limit"),
     search: parseOptionalString(query.search),
     agentId: parseOptionalString(query.agentId),
-    includeDerivedTitles: parseOptionalBooleanString(
-      query.includeDerivedTitles,
-      "includeDerivedTitles"
-    ),
     includeLastMessage: parseOptionalBooleanString(
       query.includeLastMessage,
       "includeLastMessage"

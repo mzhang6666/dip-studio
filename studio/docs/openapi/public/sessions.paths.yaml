@@ -34,12 +34,6 @@ paths:
           description: 过滤特定 Agent 的会话
           schema:
             type: string
-        - name: includeDerivedTitles
-          in: query
-          required: false
-          description: 是否根据首条消息自动生成标题
-          schema:
-            type: boolean
         - name: includeLastMessage
           in: query
           required: false
@@ -94,7 +88,7 @@ paths:
   /sessions/{key}:
     get:
       operationId: getSessionDetail
-      summary: 获取指定会话详情
+      summary: 通过会话 key 获取会话摘要详情
       parameters:
         - name: key
           in: path
@@ -111,11 +105,11 @@ paths:
             minimum: 0
       responses:
         "200":
-          description: 指定会话详情
+          description: 指定会话摘要详情
           content:
             application/json:
               schema:
-                $ref: './sessions.schemas.yaml#/components/schemas/SessionGetResponse'
+                $ref: './sessions.schemas.yaml#/components/schemas/SessionSummary'
         "400":
           $ref: '../common.schemas.yaml#/errors/InvalidParameter'
         "401":
@@ -153,12 +147,6 @@ paths:
           description: 关键词搜索，用于过滤会话
           schema:
             type: string
-        - name: includeDerivedTitles
-          in: query
-          required: false
-          description: 是否根据首条消息自动生成标题
-          schema:
-            type: boolean
         - name: includeLastMessage
           in: query
           required: false

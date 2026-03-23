@@ -36,7 +36,6 @@ describe("readSessionsListQuery", () => {
         limit: "20",
         search: "hello",
         agentId: "agent-1",
-        includeDerivedTitles: "true",
         includeLastMessage: "false",
         activeMinutes: "60",
         label: "inbox",
@@ -47,7 +46,6 @@ describe("readSessionsListQuery", () => {
       limit: 20,
       search: "hello",
       agentId: "agent-1",
-      includeDerivedTitles: true,
       includeLastMessage: false,
       activeMinutes: 60,
       label: "inbox",
@@ -57,12 +55,6 @@ describe("readSessionsListQuery", () => {
   });
 
   it("rejects invalid query values", () => {
-    expect(() =>
-      readSessionsListQuery({
-        includeDerivedTitles: "bad"
-      })
-    ).toThrow("Invalid query parameter `includeDerivedTitles`");
-
     expect(() =>
       readSessionsListQuery({
         limit: "-1"
@@ -155,6 +147,7 @@ describe("createSessionsRouter", () => {
     const router = createSessionsRouter({
       listSessions: vi.fn(),
       getSession: vi.fn(),
+      getSessionSummary: vi.fn(),
       previewSessions: vi.fn()
     }) as {
       stack: Array<{
@@ -199,6 +192,7 @@ describe("createSessionsRouter", () => {
     const router = createSessionsRouter({
       listSessions,
       getSession: vi.fn(),
+      getSessionSummary: vi.fn(),
       previewSessions: vi.fn()
     }) as {
       stack: Array<{
@@ -227,7 +221,6 @@ describe("createSessionsRouter", () => {
       limit: undefined,
       search: undefined,
       agentId: undefined,
-      includeDerivedTitles: undefined,
       includeLastMessage: undefined,
       activeMinutes: undefined,
       label: undefined,
@@ -239,13 +232,17 @@ describe("createSessionsRouter", () => {
   });
 
   it("handles session detail request", async () => {
-    const getSession = vi.fn().mockResolvedValue({
+    const getSessionSummary = vi.fn().mockResolvedValue({
       key: "session_key_1",
-      messages: []
+      kind: "direct",
+      updatedAt: 1,
+      sessionId: "runtime-1"
     });
+    const getSession = vi.fn();
     const router = createSessionsRouter({
       listSessions: vi.fn(),
       getSession,
+      getSessionSummary,
       previewSessions: vi.fn()
     }) as {
       stack: Array<{
@@ -281,9 +278,13 @@ describe("createSessionsRouter", () => {
       next
     );
 
-    expect(getSession).toHaveBeenCalledWith({
+    expect(getSessionSummary).toHaveBeenCalledWith("session_key_1");
+    expect(getSession).not.toHaveBeenCalled();
+    expect(response.json).toHaveBeenCalledWith({
       key: "session_key_1",
-      limit: 100
+      kind: "direct",
+      updatedAt: 1,
+      sessionId: "runtime-1"
     });
     expect(response.status).toHaveBeenCalledWith(200);
     expect(next).not.toHaveBeenCalled();
@@ -296,6 +297,7 @@ describe("createSessionsRouter", () => {
     const router = createSessionsRouter({
       listSessions,
       getSession: vi.fn(),
+      getSessionSummary: vi.fn(),
       previewSessions: vi.fn()
     }) as {
       stack: Array<{
@@ -335,7 +337,6 @@ describe("createSessionsRouter", () => {
       limit: 10,
       search: undefined,
       agentId: "agent-1",
-      includeDerivedTitles: undefined,
       includeLastMessage: undefined,
       activeMinutes: undefined,
       label: undefined,
@@ -354,6 +355,7 @@ describe("createSessionsRouter", () => {
     const router = createSessionsRouter({
       listSessions: vi.fn(),
       getSession,
+      getSessionSummary: vi.fn(),
       previewSessions: vi.fn()
     }) as {
       stack: Array<{
@@ -406,6 +408,7 @@ describe("createSessionsRouter", () => {
       {
         listSessions: vi.fn(),
         getSession: vi.fn(),
+        getSessionSummary: vi.fn(),
         previewSessions: vi.fn()
       },
       {
@@ -456,6 +459,7 @@ describe("createSessionsRouter", () => {
     const router1 = createSessionsRouter({
       listSessions: vi.fn().mockRejectedValue(badRequest),
       getSession: vi.fn(),
+      getSessionSummary: vi.fn(),
       previewSessions: vi.fn()
     }) as {
       stack: Array<{
@@ -484,6 +488,7 @@ describe("createSessionsRouter", () => {
     const router2 = createSessionsRouter({
       listSessions: vi.fn().mockRejectedValue(new Error("boom")),
       getSession: vi.fn(),
+      getSessionSummary: vi.fn(),
       previewSessions: vi.fn()
     }) as {
       stack: Array<{
@@ -520,8 +525,11 @@ describe("createSessionsRouter", () => {
     const notFound = new HttpError(404, "Session not found");
 
     const router1 = createSessionsRouter({
-      listSessions: vi.fn(),
-      getSession: vi.fn().mockRejectedValue(notFound),
+      listSessions: vi.fn().mockResolvedValue({
+        sessions: []
+      }),
+      getSession: vi.fn(),
+      getSessionSummary: vi.fn().mockRejectedValue(notFound),
       previewSessions: vi.fn()
     }) as {
       stack: Array<{
@@ -557,8 +565,9 @@ describe("createSessionsRouter", () => {
     expect(next1).toHaveBeenCalledWith(notFound);
 
     const router2 = createSessionsRouter({
-      listSessions: vi.fn(),
-      getSession: vi.fn().mockRejectedValue(new Error("boom")),
+      listSessions: vi.fn().mockRejectedValue(new Error("boom")),
+      getSession: vi.fn(),
+      getSessionSummary: vi.fn().mockRejectedValue(new Error("boom")),
       previewSessions: vi.fn()
     }) as {
       stack: Array<{
@@ -606,6 +615,7 @@ describe("createSessionsRouter", () => {
     const router1 = createSessionsRouter({
       listSessions: vi.fn(),
       getSession: vi.fn().mockRejectedValue(notFound),
+      getSessionSummary: vi.fn(),
       previewSessions: vi.fn()
     }) as {
       stack: Array<{
@@ -644,6 +654,7 @@ describe("createSessionsRouter", () => {
     const router2 = createSessionsRouter({
       listSessions: vi.fn(),
       getSession: vi.fn().mockRejectedValue(new Error("boom")),
+      getSessionSummary: vi.fn(),
       previewSessions: vi.fn()
     }) as {
       stack: Array<{
@@ -692,6 +703,7 @@ describe("createSessionsRouter", () => {
       {
         listSessions: vi.fn(),
         getSession: vi.fn(),
+        getSessionSummary: vi.fn(),
         previewSessions: vi.fn()
       },
       {
@@ -736,6 +748,7 @@ describe("createSessionsRouter", () => {
       {
         listSessions: vi.fn(),
         getSession: vi.fn(),
+        getSessionSummary: vi.fn(),
         previewSessions: vi.fn()
       },
       {
@@ -793,6 +806,7 @@ describe("createSessionsRouter", () => {
       {
         listSessions: vi.fn(),
         getSession: vi.fn(),
+        getSessionSummary: vi.fn(),
         previewSessions: vi.fn()
       },
       {
@@ -856,6 +870,7 @@ describe("createSessionsRouter", () => {
       {
         listSessions: vi.fn(),
         getSession: vi.fn(),
+        getSessionSummary: vi.fn(),
         previewSessions: vi.fn()
       },
       {
@@ -906,6 +921,7 @@ describe("createSessionsRouter", () => {
       {
         listSessions: vi.fn(),
         getSession: vi.fn(),
+        getSessionSummary: vi.fn(),
         previewSessions: vi.fn()
       },
       {

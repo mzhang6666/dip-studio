@@ -91,7 +91,13 @@ openssl pkey -in private.pem -pubout -out public.pem
 | 参数 | 类型 | 说明 |
 | -- | -- | -- |
 | key | string | 会话 key |
-| messages | object[] | 会话消息列表 |
+| kind | string | 会话类型 |
+| sessionId | string | 会话实例 ID |
+| updatedAt | number | 最近更新时间（毫秒） |
+| label | string | 会话标签 |
+| displayName | string | 展示名称 |
+
+返回指定会话的摘要详情；服务端会始终返回推导标题。
 
 #### 获取数字员工列表
 
@@ -277,7 +283,7 @@ openssl pkey -in private.pem -pubout -out public.pem
 
 响应：`200 application/json`
 
-返回指定会话的详情与消息列表，结构同 `GET /api/dip-studio/v1/sessions/{key}`。
+返回指定会话的完整消息详情。
 
 #### 获取会话归档列表
 
