@@ -13,14 +13,9 @@ export interface DigitalHumanResponseRequest {
  */
 export interface DigitalHumanResponseRequestHeaders {
   /**
-   * Authenticated user identifier injected by the auth middleware.
+   * Required OpenClaw session key passed through to the upstream gateway.
    */
-  "x-user-id"?: string;
-
-  /**
-   * Optional OpenClaw session key passed through to the upstream gateway.
-   */
-  "x-openclaw-session-key"?: string;
+  "x-openclaw-session-key": string;
 }
 
 /**

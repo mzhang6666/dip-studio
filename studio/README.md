@@ -166,6 +166,22 @@ openssl pkey -in private.pem -pubout -out public.pem
 | -- | -- | -- |
 | id | string | 数字员工 ID |
 
+#### 创建会话键
+
+`POST /api/dip-studio/v1/chat/session`
+
+请求头：
+
+| 参数 | 类型 | 是否必填 | 说明 |
+| -- | -- | -- | -- |
+| Authorization | string | 是 | `Bearer <access-token>`，用于 Hydra 内省鉴权 |
+
+响应：`200 application/json`
+
+| 参数 | 类型 | 说明 |
+| -- | -- | -- |
+| sessionKey | string | 新会话键，格式为 `user:<userid>:direct:<chatId>` |
+
 #### 进行数字员工对话
 
 `POST /api/dip-studio/v1/digital-human/{id}/chat/responses`
@@ -181,7 +197,7 @@ openssl pkey -in private.pem -pubout -out public.pem
 | 参数 | 类型 | 是否必填 | 说明 |
 | -- | -- | -- | -- |
 | Authorization | string | 是 | `Bearer <access-token>`，用于 Hydra 内省鉴权 |
-| x-openclaw-session-key | string | 否 | 透传到 OpenClaw `/v1/responses` 的会话键 |
+| x-openclaw-session-key | string | 是 | 必须先通过 `POST /api/dip-studio/v1/chat/session` 获取，随后透传到 OpenClaw `/v1/responses` 的会话键 |
 
 请求：`application/json`
 
@@ -190,4 +206,3 @@ openssl pkey -in private.pem -pubout -out public.pem
 响应：`200 text/event-stream`
 
 返回数字员工响应事件流，响应体为 SSE 流。
-当请求未传入 `x-openclaw-session-key` 时，服务端会根据内省得到的 `x-user-id` 自动生成 `user:<userid>:direct:<chatId>`，并在响应头返回同名 `x-openclaw-session-key`。

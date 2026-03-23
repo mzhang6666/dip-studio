@@ -1,5 +1,15 @@
 components:
   schemas:
+    CreateSessionKeyResponse:
+      summary: 创建会话键响应
+      type: object
+      properties:
+        sessionKey:
+          type: string
+          description: 新生成的会话键，格式为 `user:<userid>:direct:<chatId>`
+      required:
+        - sessionKey
+
     DigitalHumanResponseRequest:
       summary: 数字员工响应请求
       type: object

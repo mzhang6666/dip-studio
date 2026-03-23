@@ -4,7 +4,6 @@ import { describe, expect, it, vi } from "vitest";
 import { HttpError } from "../errors/http-error";
 import {
   attachDownstreamAbortHandlers,
-  buildOpenClawSessionKey,
   createDigitalHumanResponseRouter,
   pipeEventStream,
   readDigitalHumanResponseRequestBody,
@@ -73,7 +72,6 @@ describe("readDigitalHumanResponseRequestHeaders", () => {
   it("extracts x-openclaw-session-key only", () => {
     const headers = readDigitalHumanResponseRequestHeaders({
       "x-openclaw-session-key": "agent:demo:session-1",
-      "x-user-id": "user-1",
       "x-openclaw-extra": "ignored"
     });
 
@@ -82,27 +80,9 @@ describe("readDigitalHumanResponseRequestHeaders", () => {
     expect(headers?.get("x-openclaw-extra")).toBeNull();
   });
 
-  it("fails when both x-openclaw-session-key and x-user-id are absent", () => {
+  it("fails when x-openclaw-session-key is absent", () => {
     expect(() => readDigitalHumanResponseRequestHeaders({})).toThrow(
-      "x-user-id header is required when x-openclaw-session-key is absent"
-    );
-  });
-
-  it("builds a new session key from x-user-id when the client did not provide one", () => {
-    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("chat-1");
-
-    const headers = readDigitalHumanResponseRequestHeaders({
-      "x-user-id": "user-1"
-    });
-
-    expect(headers?.get("x-openclaw-session-key")).toBe("user:user-1:direct:chat-1");
-  });
-});
-
-describe("buildOpenClawSessionKey", () => {
-  it("uses the user id and chat id to build the expected session key", () => {
-    expect(buildOpenClawSessionKey("user-1", "chat-1")).toBe(
-      "user:user-1:direct:chat-1"
+      "x-openclaw-session-key header is required"
     );
   });
 });
@@ -268,8 +248,7 @@ describe("createDigitalHumanResponseRouter", () => {
         input: "hello"
       },
       headers: {
-        "x-openclaw-session-key": "agent:agent-1:session-1",
-        "x-user-id": "user-1"
+        "x-openclaw-session-key": "agent:agent-1:session-1"
       },
       on: vi.fn()
     } as unknown as Request;
@@ -287,33 +266,16 @@ describe("createDigitalHumanResponseRouter", () => {
         "x-openclaw-session-key"
       )
     ).toBe("agent:agent-1:session-1");
-    expect(response.setHeader).toHaveBeenCalledWith(
-      "x-openclaw-session-key",
-      "agent:agent-1:session-1"
-    );
     expect(response.write).toHaveBeenCalledOnce();
     expect(response.end).toHaveBeenCalledOnce();
     expect(next).not.toHaveBeenCalled();
   });
 
-  it("generates and returns a session key when the client did not provide one", async () => {
-    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("chat-1");
-
+  it("rejects the request when x-openclaw-session-key is absent", async () => {
     const response = createResponseDouble();
     const next = vi.fn<NextFunction>();
-    const createResponseStream = vi.fn().mockResolvedValue({
-      status: 200,
-      headers: new Headers({
-        "content-type": "text/event-stream"
-      }),
-      body: new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.close();
-        }
-      })
-    });
     const router = createDigitalHumanResponseRouter({
-      createResponseStream
+      createResponseStream: vi.fn()
     }) as {
       stack: Array<{
         route?: {
@@ -339,24 +301,18 @@ describe("createDigitalHumanResponseRouter", () => {
       body: {
         input: "hello"
       },
-      headers: {
-        "x-user-id": "user-1"
-      },
+      headers: {},
       on: vi.fn()
     } as unknown as Request;
 
     await handler?.(request, response, next);
 
-    expect(
-      (createResponseStream.mock.calls[0]?.[3] as Headers | undefined)?.get(
-        "x-openclaw-session-key"
-      )
-    ).toBe("user:user-1:direct:chat-1");
-    expect(response.setHeader).toHaveBeenCalledWith(
-      "x-openclaw-session-key",
-      "user:user-1:direct:chat-1"
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({
+        statusCode: 401,
+        message: "x-openclaw-session-key header is required"
+      })
     );
-    expect(next).not.toHaveBeenCalled();
   });
 
   it("forwards validation errors to middleware", async () => {
@@ -430,6 +386,9 @@ describe("createDigitalHumanResponseRouter", () => {
       body: {
         input: "hello"
       },
+      headers: {
+        "x-openclaw-session-key": "agent:agent-1:session-1"
+      },
       on: vi.fn()
     } as unknown as Request;
 
@@ -486,6 +445,9 @@ describe("createDigitalHumanResponseRouter", () => {
       body: {
         input: "hello"
       },
+      headers: {
+        "x-openclaw-session-key": "agent:agent-1:session-1"
+      },
       on: vi.fn()
     } as unknown as Request;
 
@@ -525,6 +487,9 @@ describe("createDigitalHumanResponseRouter", () => {
       },
       body: {
         input: "hello"
+      },
+      headers: {
+        "x-openclaw-session-key": "agent:agent-1:session-1"
       },
       on: vi.fn((eventName: string, listener: () => void) => {
         if (eventName === "aborted") {
@@ -569,6 +534,9 @@ describe("createDigitalHumanResponseRouter", () => {
       },
       body: {
         input: "hello"
+      },
+      headers: {
+        "x-openclaw-session-key": "agent:agent-1:session-1"
       },
       on: vi.fn()
     } as unknown as Request;

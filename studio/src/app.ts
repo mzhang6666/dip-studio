@@ -9,6 +9,7 @@ import { createCronRouter } from "./routes/plan";
 import { createDigitalHumanResponseRouter } from "./routes/digital-human-response";
 import { createDigitalHumanRouter } from "./routes/digital-human";
 import { createHealthRouter } from "./routes/health";
+import { createSessionKeyRouter } from "./routes/session-key";
 import { createSessionsRouter } from "./routes/sessions";
 import { createSkillsRouter } from "./routes/skills";
 
@@ -52,6 +53,7 @@ export function createApp(options: AppOptions = {}): Express {
   app.use(createHealthRouter());
   app.use(createBknRouter());
   app.use(createCronRouter());
+  app.use(createSessionKeyRouter());
   app.use(createSessionsRouter());
   app.use(createSkillsRouter());
   app.use(createDigitalHumanRouter());

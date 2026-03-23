@@ -48,6 +48,8 @@ OpenClaw 支持在调用 /v1/responses 接口时传入 `x-openclaw-session-key` 
 用户与数字员工进行对话时，可选在 Header 传递 `x-openclaw-session-key` 来指定会话。结构为：`user:<userid>:direct:<chatId>`
 - 例子：`user:2a664704-5e18-11e3-a957-dcd2fc061e41:direct:4d1905d7-1f7b-4f0d-b9bf-6b6b7a5b2f29`
 
+业务流程：
+
 ```mermaid
 sequenceDiagram
 
@@ -55,17 +57,18 @@ participant SW as Web
 participant BE as Studio Backend(Express)
 participant OC as OpenClaw
 
-SW ->> BE: /v1/chat/responses
-
-alt w/ x-openclaw-session-key
-BE ->> OC: 透传 /v1/responses
-end
-alt w/o x-openclaw-session-key
+alt 新会话
+SW ->> BE: POST v1/session/key
 BE ->> BE: 根据 Header: Bearer <token> 获取 userid
 BE ->> BE: 生成 UUID 作为新会话 chatId
-BE ->> BE: 拼接 Header: x-openclaw-session-key: user:<userid>:direct:<chatId>
-BE ->> OC: 调用 /v1/responses
+BE ->> SW: 返回 session-key，格式：user:<userid>:direct:<chatId>
+SW ->> BE: 调用 /v1/chat/responses，并附带 Header: x-openclaw-session-key
+BE ->> OC: 透传 OpenClaw /v1/responses
+end
 
+alt 继续对话
+SW ->> BE: 调用 /v1/chat/responses，并附带 Header: x-openclaw-session-key
+BE ->> OC: 透传 OpenClaw /v1/responses
 end
 
 ```
