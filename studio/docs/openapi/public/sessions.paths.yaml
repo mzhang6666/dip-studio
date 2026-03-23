@@ -248,26 +248,20 @@ paths:
         "500":
           $ref: '../common.schemas.yaml#/errors/InternalServerError'
 
-  /digital-human/{id}/sessions/{session_id}/archives:
+  /sessions/{key}/archives:
     get:
-      operationId: getDigitalHumanSessionArchives
-      summary: 获取指定数字员工会话下的归档物
+      operationId: getSessionArchives
+      summary: 通过会话 key 获取会话归档物
       parameters:
-        - name: id
+        - name: key
           in: path
           required: true
-          description: 数字员工 ID
-          schema:
-            type: string
-        - name: session_id
-          in: path
-          required: true
-          description: 会话 ID
+          description: 会话 key
           schema:
             type: string
       responses:
         "200":
-          description: 指定数字员工会话归档物列表
+          description: 指定会话归档物列表
           content:
             application/json:
               schema:
@@ -285,21 +279,15 @@ paths:
         "500":
           $ref: '../common.schemas.yaml#/errors/InternalServerError'
 
-  /digital-human/{id}/sessions/{session_id}/archives/{subpath}:
+  /sessions/{key}/archives/{subpath}:
     get:
-      operationId: getDigitalHumanSessionArchiveSubpath
-      summary: 获取指定数字员工会话归档子路径内容
+      operationId: getSessionArchiveSubpath
+      summary: 通过会话 key 获取归档子路径内容
       parameters:
-        - name: id
+        - name: key
           in: path
           required: true
-          description: 数字员工 ID
-          schema:
-            type: string
-        - name: session_id
-          in: path
-          required: true
-          description: 会话 ID
+          description: 会话 key
           schema:
             type: string
         - name: subpath

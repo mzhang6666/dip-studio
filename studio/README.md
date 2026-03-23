@@ -278,3 +278,32 @@ openssl pkey -in private.pem -pubout -out public.pem
 响应：`200 application/json`
 
 返回指定会话的详情与消息列表，结构同 `GET /api/dip-studio/v1/sessions/{key}`。
+
+#### 获取会话归档列表
+
+`GET /api/dip-studio/v1/sessions/{key}/archives`
+
+路径参数：
+
+| 参数 | 类型 | 是否必填 | 说明 |
+| -- | -- | -- | -- |
+| key | string | 是 | 会话 key |
+
+响应：`200 application/json`
+
+返回指定会话的归档物列表。
+
+#### 获取会话归档子路径内容
+
+`GET /api/dip-studio/v1/sessions/{key}/archives/{subpath}`
+
+路径参数：
+
+| 参数 | 类型 | 是否必填 | 说明 |
+| -- | -- | -- | -- |
+| key | string | 是 | 会话 key |
+| subpath | string | 是 | 归档子路径，支持多级目录 |
+
+响应：`200 application/json | application/octet-stream | text/plain`
+
+目录返回 JSON，文件返回原始内容。

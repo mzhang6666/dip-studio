@@ -6,6 +6,7 @@ import {
   parseOptionalBooleanString,
   parseOptionalNonNegativeIntegerString,
   normalizeArchiveSessionId,
+  readRequiredArchiveAgentId,
   readRequiredPathParam,
   readRequiredSubpathParam,
   readSessionGetParams,
@@ -120,6 +121,17 @@ describe("digital human sessions helpers", () => {
       )
     ).toBe("9fb6b0da-c26e-4419-929e-6b8a1274f80c");
   });
+
+  it("reads archive agent id from session key", () => {
+    expect(
+      readRequiredArchiveAgentId(
+        "agent:de_finance:user:user-1:direct:9fb6b0da-c26e-4419-929e-6b8a1274f80c"
+      )
+    ).toBe("de_finance");
+    expect(() => readRequiredArchiveAgentId("user:user-1:direct:session-1")).toThrow(
+      "Invalid path parameter `key`"
+    );
+  });
 });
 
 describe("sessions helpers", () => {
@@ -166,14 +178,10 @@ describe("createSessionsRouter", () => {
         entry.route?.path === "/api/dip-studio/v1/sessions/:key/messages"
     );
     const digitalHumanArchivesLayer = router.stack.find(
-      (entry) =>
-        entry.route?.path ===
-        "/api/dip-studio/v1/digital-human/:id/sessions/:session_id/archives"
+      (entry) => entry.route?.path === "/api/dip-studio/v1/sessions/:key/archives"
     );
     const digitalHumanArchiveSubpathLayer = router.stack.find(
-      (entry) =>
-        entry.route?.path ===
-        "/api/dip-studio/v1/digital-human/:id/sessions/:session_id/archives/*subpath"
+      (entry) => entry.route?.path === "/api/dip-studio/v1/sessions/:key/archives/*subpath"
     );
 
     expect(listLayer).toBeDefined();
@@ -389,7 +397,7 @@ describe("createSessionsRouter", () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  it("handles digital human session archives request", async () => {
+  it("handles session archives request", async () => {
     const listSessionArchives = vi.fn().mockResolvedValue({
       path: "/",
       contents: []
@@ -419,9 +427,7 @@ describe("createSessionsRouter", () => {
       }>;
     };
     const getLayer = router.stack.find(
-      (entry) =>
-        entry.route?.path ===
-        "/api/dip-studio/v1/digital-human/:id/sessions/:session_id/archives"
+      (entry) => entry.route?.path === "/api/dip-studio/v1/sessions/:key/archives"
     );
     const handler = getLayer?.route?.stack[0]?.handle;
     const response = createResponseDouble();
@@ -430,8 +436,7 @@ describe("createSessionsRouter", () => {
     await handler?.(
       {
         params: {
-          id: "agent-1",
-          session_id: "agent:de_finance:cron:session-1"
+          key: "agent:de_finance:user:user-1:direct:session-1"
         },
         query: {}
       } as unknown as Request,
@@ -439,7 +444,7 @@ describe("createSessionsRouter", () => {
       next
     );
 
-    expect(listSessionArchives).toHaveBeenCalledWith("agent-1", "session-1");
+    expect(listSessionArchives).toHaveBeenCalledWith("de_finance", "session-1");
     expect(response.status).toHaveBeenCalledWith(200);
     expect(next).not.toHaveBeenCalled();
   });
@@ -679,7 +684,7 @@ describe("createSessionsRouter", () => {
     });
   });
 
-  it("forwards digital human archives HttpError and wraps unknown errors", async () => {
+  it("forwards session archives HttpError and wraps unknown errors", async () => {
     const { HttpError } = await import("../errors/http-error");
     const forbidden = new HttpError(403, "Forbidden");
 
@@ -708,9 +713,7 @@ describe("createSessionsRouter", () => {
       }>;
     };
     const getLayer1 = router1.stack.find(
-      (entry) =>
-        entry.route?.path ===
-        "/api/dip-studio/v1/digital-human/:id/sessions/:session_id/archives"
+      (entry) => entry.route?.path === "/api/dip-studio/v1/sessions/:key/archives"
     );
     const handler1 = getLayer1?.route?.stack[0]?.handle;
     const response1 = createResponseDouble();
@@ -719,8 +722,7 @@ describe("createSessionsRouter", () => {
     await handler1?.(
       {
         params: {
-          id: "agent-1",
-          session_id: "session-1"
+          key: "agent:agent-1:direct:session-1"
         },
         query: {}
       } as unknown as Request,
@@ -755,9 +757,7 @@ describe("createSessionsRouter", () => {
       }>;
     };
     const getLayer2 = router2.stack.find(
-      (entry) =>
-        entry.route?.path ===
-        "/api/dip-studio/v1/digital-human/:id/sessions/:session_id/archives"
+      (entry) => entry.route?.path === "/api/dip-studio/v1/sessions/:key/archives"
     );
     const handler2 = getLayer2?.route?.stack[0]?.handle;
     const response2 = createResponseDouble();
@@ -766,8 +766,7 @@ describe("createSessionsRouter", () => {
     await handler2?.(
       {
         params: {
-          id: "agent-1",
-          session_id: "session-1"
+          key: "agent:agent-1:direct:session-1"
         },
         query: {}
       } as unknown as Request,
@@ -778,11 +777,11 @@ describe("createSessionsRouter", () => {
     expect(next2).toHaveBeenCalledOnce();
     expect(vi.mocked(next2).mock.calls[0]?.[0]).toMatchObject({
       statusCode: 502,
-      message: "Failed to query digital human session archives"
+      message: "Failed to query session archives"
     });
   });
 
-  it("handles digital human session archive subpath request", async () => {
+  it("handles session archive subpath request", async () => {
     const getSessionArchiveSubpath = vi.fn().mockResolvedValue({
       status: 200,
       headers: new Headers({
@@ -815,9 +814,7 @@ describe("createSessionsRouter", () => {
       }>;
     };
     const getLayer = router.stack.find(
-      (entry) =>
-        entry.route?.path ===
-        "/api/dip-studio/v1/digital-human/:id/sessions/:session_id/archives/*subpath"
+      (entry) => entry.route?.path === "/api/dip-studio/v1/sessions/:key/archives/*subpath"
     );
     const handler = getLayer?.route?.stack[0]?.handle;
     const response = {
@@ -831,8 +828,7 @@ describe("createSessionsRouter", () => {
     await handler?.(
       {
         params: {
-          id: "agent-1",
-          session_id: "agent:de_finance:cron:session-1",
+          key: "agent:de_finance:user:user-1:direct:session-1",
           subpath: "notes/today.txt"
         },
         query: {}
@@ -842,7 +838,7 @@ describe("createSessionsRouter", () => {
     );
 
     expect(getSessionArchiveSubpath).toHaveBeenCalledWith(
-      "agent-1",
+      "de_finance",
       "session-1",
       "notes/today.txt"
     );
@@ -881,9 +877,7 @@ describe("createSessionsRouter", () => {
       }>;
     };
     const getLayer1 = router1.stack.find(
-      (entry) =>
-        entry.route?.path ===
-        "/api/dip-studio/v1/digital-human/:id/sessions/:session_id/archives/*subpath"
+      (entry) => entry.route?.path === "/api/dip-studio/v1/sessions/:key/archives/*subpath"
     );
     const handler1 = getLayer1?.route?.stack[0]?.handle;
     const response1 = {
@@ -897,8 +891,7 @@ describe("createSessionsRouter", () => {
     await handler1?.(
       {
         params: {
-          id: "agent-1",
-          session_id: "session-1",
+          key: "agent:agent-1:direct:session-1",
           subpath: "notes/today.txt"
         },
         query: {}
@@ -934,9 +927,7 @@ describe("createSessionsRouter", () => {
       }>;
     };
     const getLayer2 = router2.stack.find(
-      (entry) =>
-        entry.route?.path ===
-        "/api/dip-studio/v1/digital-human/:id/sessions/:session_id/archives/*subpath"
+      (entry) => entry.route?.path === "/api/dip-studio/v1/sessions/:key/archives/*subpath"
     );
     const handler2 = getLayer2?.route?.stack[0]?.handle;
     const response2 = {
@@ -950,8 +941,7 @@ describe("createSessionsRouter", () => {
     await handler2?.(
       {
         params: {
-          id: "agent-1",
-          session_id: "session-1",
+          key: "agent:agent-1:direct:session-1",
           subpath: "notes/today.txt"
         },
         query: {}
@@ -963,7 +953,7 @@ describe("createSessionsRouter", () => {
     expect(next2).toHaveBeenCalledOnce();
     expect(vi.mocked(next2).mock.calls[0]?.[0]).toMatchObject({
       statusCode: 502,
-      message: "Failed to query digital human session archive subpath"
+      message: "Failed to query session archive subpath"
     });
   });
 });

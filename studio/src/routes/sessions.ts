@@ -9,6 +9,7 @@ import {
 } from "../infra/openclaw-archives-http-client";
 import { OpenClawGatewayClient } from "../infra/openclaw-gateway-client";
 import { DefaultSessionsLogic, type SessionsLogic } from "../logic/sessions";
+import { parseSession } from "../utils/session";
 import type {
   OpenClawSessionGetParams,
   OpenClawSessionsListParams,
@@ -67,21 +68,9 @@ export interface SessionMessagesParams {
 }
 
 /**
- * Path parameters for digital human session archives endpoint.
+ * Path parameters for session archives subpath endpoint.
  */
-export interface DigitalHumanSessionArchivesParams
-extends DigitalHumanSessionsParams {
-  /**
-   * Session id.
-   */
-  session_id: string;
-}
-
-/**
- * Path parameters for digital human session archives subpath endpoint.
- */
-export interface DigitalHumanSessionArchivesSubpathParams
-extends DigitalHumanSessionArchivesParams {
+export interface SessionArchivesSubpathParams extends SessionDetailParams {
   /**
    * Archive subpath.
    */
@@ -216,10 +205,10 @@ export function createSessionsRouter(
   );
 
   router.get(
-    "/api/dip-studio/v1/digital-human/:id/sessions/:session_id/archives",
+    "/api/dip-studio/v1/sessions/:key/archives",
     async (
       request: Request<
-        DigitalHumanSessionArchivesParams,
+        SessionDetailParams,
         unknown,
         unknown,
         Record<string, never>
@@ -228,9 +217,10 @@ export function createSessionsRouter(
       next: NextFunction
     ): Promise<void> => {
       try {
-        const dhId = readRequiredPathParam(request.params.id, "id");
+        const key = readRequiredPathParam(request.params.key, "key");
+        const dhId = readRequiredArchiveAgentId(key);
         const sessionId = normalizeArchiveSessionId(
-          readRequiredPathParam(request.params.session_id, "session_id")
+          key
         );
         const result = await archivesHttpClient.listSessionArchives(dhId, sessionId);
 
@@ -239,17 +229,17 @@ export function createSessionsRouter(
         next(
           error instanceof HttpError
             ? error
-            : new HttpError(502, "Failed to query digital human session archives")
+            : new HttpError(502, "Failed to query session archives")
         );
       }
     }
   );
 
   router.get(
-    "/api/dip-studio/v1/digital-human/:id/sessions/:session_id/archives/*subpath",
+    "/api/dip-studio/v1/sessions/:key/archives/*subpath",
     async (
       request: Request<
-        DigitalHumanSessionArchivesSubpathParams,
+        SessionArchivesSubpathParams,
         unknown,
         unknown,
         Record<string, never>
@@ -258,9 +248,10 @@ export function createSessionsRouter(
       next: NextFunction
     ): Promise<void> => {
       try {
-        const dhId = readRequiredPathParam(request.params.id, "id");
+        const key = readRequiredPathParam(request.params.key, "key");
+        const dhId = readRequiredArchiveAgentId(key);
         const sessionId = normalizeArchiveSessionId(
-          readRequiredPathParam(request.params.session_id, "session_id")
+          key
         );
         const subpath = readRequiredSubpathParam(request.params.subpath, "subpath");
         const result = await archivesHttpClient.getSessionArchiveSubpath(
@@ -279,7 +270,7 @@ export function createSessionsRouter(
         next(
           error instanceof HttpError
             ? error
-            : new HttpError(502, "Failed to query digital human session archive subpath")
+            : new HttpError(502, "Failed to query session archive subpath")
         );
       }
     }
@@ -410,6 +401,22 @@ export function normalizeArchiveSessionId(rawSessionId: string): string {
   const lastPart = parts.at(-1);
 
   return lastPart ?? trimmed;
+}
+
+/**
+ * Reads the required archive agent id from one session key.
+ *
+ * @param rawSessionKey Raw session key from path.
+ * @returns The agent id encoded in the session key.
+ */
+export function readRequiredArchiveAgentId(rawSessionKey: string): string {
+  const parsedSession = parseSession(rawSessionKey.trim());
+
+  if (parsedSession.agent === undefined || parsedSession.agent.trim() === "") {
+    throw new HttpError(400, "Invalid path parameter `key`");
+  }
+
+  return parsedSession.agent;
 }
 
 /**
