@@ -27,6 +27,8 @@ import {
   renderSoulMarkdown
 } from "./digital-human-template";
 
+const HIDDEN_DIGITAL_HUMAN_IDS = new Set(["main", "__internal_skill_agent__"]);
+
 /**
  * Application logic used to manage digital humans.
  */
@@ -124,9 +126,10 @@ export class DefaultDigitalHumanLogic implements DigitalHumanLogic {
    */
   public async listDigitalHumans(): Promise<DigitalHumanList> {
     const { agents } = await this.openClawAgentsAdapter.listAgents();
+    const visibleAgents = agents.filter((agent) => !HIDDEN_DIGITAL_HUMAN_IDS.has(agent.id));
 
     return Promise.all(
-      agents.map(async (agent) => {
+      visibleAgents.map(async (agent) => {
         try {
           const identityResult = await this.openClawAgentsAdapter.getAgentFile({
             agentId: agent.id,

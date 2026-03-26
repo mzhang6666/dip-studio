@@ -51,8 +51,8 @@ describe("DefaultDigitalHumanLogic", () => {
         scope: "per-sender",
         agents: [
           {
-            id: "main",
-            name: "Main Agent",
+            id: "agent-1",
+            name: "Listed Agent",
             identity: {
               avatarUrl: "https://example.com/main.png"
             }
@@ -72,14 +72,60 @@ describe("DefaultDigitalHumanLogic", () => {
 
     await expect(logic.listDigitalHumans()).resolves.toEqual([
       {
-        id: "main",
+        id: "agent-1",
         name: "From File",
         creature: "Engineer"
       }
     ]);
     expect(openClawAgentsAdapter.listAgents).toHaveBeenCalledOnce();
     expect(openClawAgentsAdapter.getAgentFile).toHaveBeenCalledWith({
-      agentId: "main",
+      agentId: "agent-1",
+      name: "IDENTITY.md"
+    });
+  });
+
+  it("filters hidden built-in assistants from the list", async () => {
+    const openClawAgentsAdapter = {
+      listAgents: vi.fn().mockResolvedValue({
+        defaultId: "main",
+        mainKey: "sender",
+        scope: "per-sender",
+        agents: [
+          {
+            id: "main",
+            name: "Main Agent"
+          },
+          {
+            id: "__internal_skill_agent__",
+            name: "Skill Agent"
+          },
+          {
+            id: "a1",
+            name: "Visible Agent"
+          }
+        ]
+      }),
+      getAgentFile: vi.fn().mockResolvedValue({
+        file: {
+          content: "- Name: Visible Agent\n- Creature: Analyst\n"
+        }
+      })
+    };
+    const logic = new DefaultDigitalHumanLogic({
+      openClawAgentsAdapter: openClawAgentsAdapter as never,
+      agentSkillsLogic: stubAgentSkills()
+    });
+
+    await expect(logic.listDigitalHumans()).resolves.toEqual([
+      {
+        id: "a1",
+        name: "Visible Agent",
+        creature: "Analyst"
+      }
+    ]);
+    expect(openClawAgentsAdapter.getAgentFile).toHaveBeenCalledTimes(1);
+    expect(openClawAgentsAdapter.getAgentFile).toHaveBeenCalledWith({
+      agentId: "a1",
       name: "IDENTITY.md"
     });
   });

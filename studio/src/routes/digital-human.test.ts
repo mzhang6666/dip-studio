@@ -115,8 +115,8 @@ describe("createDigitalHumanRouter", () => {
     const { createDigitalHumanRouter } = await importRouterWithLogicMock({
       listDigitalHumans: async () => [
         {
-          id: "main",
-          name: "Main Agent"
+          id: "a1",
+          name: "Visible Agent"
         }
       ]
     });
@@ -130,8 +130,8 @@ describe("createDigitalHumanRouter", () => {
     expect(response.status).toHaveBeenCalledWith(200);
     expect(response.json).toHaveBeenCalledWith([
       {
-        id: "main",
-        name: "Main Agent"
+        id: "a1",
+        name: "Visible Agent"
       }
     ]);
     expect(next).not.toHaveBeenCalled();
