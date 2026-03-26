@@ -24,13 +24,14 @@ export function registerArchivesAccess(api: OpenClawPluginApi): void {
         const agentId = urlObj.searchParams.get("agent");
 
         if (agentId) {
-          const agentsObj = api.config?.agents as any;
+          // `api.config` is a registration-time snapshot; load fresh config like skills-control.
+          const cfg = await api.runtime.config.loadConfig();
+          const agentsObj = cfg.agents as any;
           const agentList = agentsObj?.list;
           if (Array.isArray(agentList)) {
             const agentCfg = agentList.find(a => a.id === agentId);
             if (agentCfg && agentCfg.workspace) {
-              const baseDir = api.resolvePath(".") || process.cwd();
-              workspaceDir = path.resolve(baseDir, agentCfg.workspace);
+              workspaceDir = agentCfg.workspace
             } else {
               api.logger.warn(`Agent workspace not found for: ${agentId}`);
               res.statusCode = 404;
