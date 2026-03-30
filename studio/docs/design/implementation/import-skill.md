@@ -6,8 +6,8 @@
 
 | 层级 | 职责 |
 |------|------|
-| **Studio** `POST /api/dip-studio/v1/skills/install` | 接收 **`multipart/form-data`**：字段 **`file`**（zip）、可选 **`overwrite`**、可选 **`skillName`**（扁平包必填）；`multer` 内存存储，单文件 ≤ 32MB；将 **`file.buffer`** 与查询参数（`?overwrite=`、`?skillName=`）通过 `DefaultOpenClawAgentSkillsHttpClient.installSkill` 转发；**不在本机写入 `skills/`**。 |
-| **DIP 插件** `POST /v1/config/agents/skills/install` | 接收 zip body；用宿主 **`tar -xf` 或 `unzip`** 解压；支持**嵌套**（单一顶层目录 + `SKILL.md`）或**扁平**（zip 根含 `SKILL.md` + `skillName` 查询参数）；写入 **`path.join(repoRoot, "skills", skillName)`**；返回 `skillName` 与 **`skillPath`（网关主机绝对路径）**。 |
+| **Studio** `POST /api/dip-studio/v1/skills/install` | 接收 **`multipart/form-data`**（**非** URL 查询参数）：字段 **`file`**（ZIP）、可选 **`overwrite`**、可选 **`skillName`**（不传时可由上传文件名推导）；`multer` 内存存储，单文件 ≤ 32MB；将 zip 与解析后的 **`overwrite` / `skillName`** 通过 `DefaultOpenClawAgentSkillsHttpClient.installSkill` 转发至网关；**不在本机写入 `skills/`**。 |
+| **DIP 插件** `POST /v1/config/agents/skills/install` | **请求体**为 zip 字节；用宿主 **`tar -xf` 或 `unzip`** 解压；支持**嵌套**（单一顶层目录 + `SKILL.md`）或**扁平**（zip 根含 `SKILL.md` 时须提供 `skillName` 或与包内布局一致）；**`overwrite` / `skillName`** 由网关 HTTP 层随请求传入安装逻辑（与 Studio 转发的值对应）；写入 **`path.join(repoRoot, "skills", skillName)`**；返回 `skillName` 与 **`skillPath`（网关主机绝对路径）**。 |
 
 代码参考：
 
