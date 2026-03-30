@@ -22,6 +22,7 @@ const OPENCLAW_CLIENT_ID = "gateway-client";
 const OPENCLAW_CLIENT_MODE = "backend";
 const OPENCLAW_ROLE = "operator";
 const OPENCLAW_SCOPES = ["operator.read", "operator.write", "operator.admin"];
+const OPENCLAW_CAPS = ["tool-events"];
 const OPENCLAW_PLATFORM = "linux";
 const OPENCLAW_DEVICE_FAMILY = "";
 const DEFAULT_TIMEOUT_MS = 5_000;
@@ -848,7 +849,7 @@ export function createConnectRequest(
       },
       role: OPENCLAW_ROLE,
       scopes: OPENCLAW_SCOPES,
-      caps: [],
+      caps: OPENCLAW_CAPS,
       commands: [],
       permissions: {},
       auth: token === undefined ? {} : { token },

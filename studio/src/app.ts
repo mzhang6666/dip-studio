@@ -6,6 +6,7 @@ import { createHydraAuthMiddleware } from "./middleware/hydra-auth";
 import { notFoundHandler } from "./middleware/not-found";
 import { createBknRouter } from "./routes/bkn";
 import { createCronRouter } from "./routes/plan";
+import { createChatAgentRouter } from "./routes/chat-agent";
 import { createDigitalHumanResponseRouter } from "./routes/digital-human-response";
 import { createDigitalHumanRouter } from "./routes/digital-human";
 import { createHealthRouter } from "./routes/health";
@@ -59,6 +60,7 @@ export function createApp(options: AppOptions = {}): Express {
   app.use(createSessionsRouter());
   app.use(createSkillsRouter());
   app.use(createDigitalHumanRouter());
+  app.use(createChatAgentRouter());
   app.use(createDigitalHumanResponseRouter());
 
   if (options.enableDiagnostics === true) {

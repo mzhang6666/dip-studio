@@ -729,6 +729,7 @@ describe("gateway helpers", () => {
       minProtocol: 3,
       maxProtocol: 3,
       role: "operator",
+      caps: ["tool-events"],
       client: {
         id: "gateway-client",
         platform: "linux",

@@ -25,6 +25,62 @@ components:
       type: object
       additionalProperties: true
 
+    ChatAgentInputTextContentPart:
+      summary: Chat Agent 输入文本片段
+      type: object
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          enum:
+            - input_text
+            - text
+        text:
+          type: string
+      required:
+        - type
+        - text
+
+    ChatAgentMessageInputItem:
+      summary: Chat Agent 输入消息项
+      type: object
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          const: message
+        role:
+          type: string
+          enum:
+            - system
+            - developer
+            - user
+            - assistant
+        content:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                $ref: './responses.schemas.yaml#/components/schemas/ChatAgentInputTextContentPart'
+      required:
+        - type
+        - role
+        - content
+
+    ChatAgentRequest:
+      summary: 基于 OpenResponse 风格的 Chat Agent 请求
+      type: object
+      additionalProperties: true
+      properties:
+        input:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                $ref: './responses.schemas.yaml#/components/schemas/ChatAgentMessageInputItem'
+      required:
+        - input
+
     DigitalHumanResponseStream:
       summary: 数字员工响应事件流
       type: string

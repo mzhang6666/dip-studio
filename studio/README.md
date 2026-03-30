@@ -436,6 +436,29 @@ GitHub：https://github.com/kweaver-ai/web
 
 返回数字员工响应事件流，响应体为 SSE 流。
 
+#### 进行数字员工消息流对话
+
+`POST /api/dip-studio/v1/chat/agent`
+
+请求头：
+
+| 参数 | 类型 | 是否必填 | 说明 |
+| -- | -- | -- | -- |
+| Authorization | string | 是 | `Bearer <access-token>`，用于 Hydra 内省鉴权 |
+| x-openclaw-session-key | string | 是 | 必须先通过 `POST /api/dip-studio/v1/chat/session` 获取；服务会从其中的 `agent:<agentId>` 前缀解析数字员工 ID |
+
+请求：`application/json`
+
+请求体参数：
+
+| 参数 | 类型 | 是否必填 | 说明 |
+| -- | -- | -- | -- |
+| input | string \| MessageItem[] | 是 | OpenResponse 风格输入；当前服务会从中提取最后一条 `role=user` 的文本消息，或直接使用字符串 |
+
+响应：`200 text/event-stream`
+
+返回 OpenResponse 风格 SSE 事件流。服务端通过 OpenClaw WebSocket `chat.send` 建立 Agent 消息流，自动生成随机 UUID 作为 `params.idempotencyKey`，并将 `chat` 文本帧与 `agent/tool` 工具调用帧转换为 `response.created`、`response.output_item.added`、`response.output_text.delta`、`response.output_item.done`、`response.completed`、`response.failed` 等事件。
+
 #### 获取会话消息详情
 
 `GET /api/dip-studio/v1/sessions/{key}/messages`
